@@ -24,6 +24,10 @@ export class Match {
     this.id = 'm' + (seq++) + crypto.randomBytes(3).toString('hex');
     this.modeId = mode;
     this.modeDef = MODES[mode];
+    // tests may shorten timings via server config; production uses the defaults
+    const cfg = (services && services.config) || {};
+    this.cfg = cfg;
+    this.duration = (cfg.durations && cfg.durations[mode]) || this.modeDef.duration;
     this.practice = !!practice;
     this.services = services;
     this.hub = hub;
@@ -172,7 +176,7 @@ export class Match {
 
   // ------------------------------------------------------------------ lifecycle
   start() {
-    const secs = this.practice ? MATCH.PRACTICE_VOTE_SECONDS : MATCH.VOTE_SECONDS;
+    const secs = this.cfg.voteSeconds ?? (this.practice ? MATCH.PRACTICE_VOTE_SECONDS : MATCH.VOTE_SECONDS);
     this.voteEndsAt = Date.now() + secs * 1000;
     // Bots vote at random moments
     for (const p of this.byNum) if (p.isBot) {
@@ -260,7 +264,7 @@ export class Match {
     this.state = 'countdown';
     this.mode.setupWorld?.();
     this.spawnAll();
-    this.countdownEndsAt = Date.now() + MATCH.COUNTDOWN_SECONDS * 1000;
+    this.countdownEndsAt = Date.now() + (this.cfg.countdownSeconds ?? MATCH.COUNTDOWN_SECONDS) * 1000;
     for (const p of this.byNum) p.frozen = true;
     for (const p of this.humans()) this.emitTo(p, 'match:init', this.initPayload(p));
   }

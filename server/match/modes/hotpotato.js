@@ -19,7 +19,7 @@ export class HotPotatoMode {
 
   onStart() {
     for (const p of this.m.alivePlayers()) p.lives = LIVES;
-    this.endsAt = Date.now() + this.m.modeDef.duration * 1000;
+    this.endsAt = Date.now() + this.m.duration * 1000;
     this.newRound();
   }
 

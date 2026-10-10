@@ -37,6 +37,7 @@ body {
 }
 input, textarea, select { user-select: text; }
 .hidden { display: none !important; }
+#app { height: 100%; }
 button { font-family: inherit; }
 a { color: var(--cyan); }
 
@@ -448,8 +449,9 @@ a { color: var(--cyan); }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 28px; max-width: 900px; }
 .setting { background: rgba(255, 255, 255, 0.05); padding: 14px 16px; border-radius: 14px; }
 .setting label { font-weight: 700; display: flex; justify-content: space-between; margin-bottom: 8px; }
+.setting label.check { justify-content: flex-start; color: var(--text); }
 .setting input[type=range] { width: 100%; accent-color: var(--pink); }
-.keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 15px; }
+.keys { display: grid; grid-template-columns: 1fr 170px; gap: 6px 16px; font-size: 15px; align-items: center; max-width: 620px; }
 .kbd { display: inline-block; min-width: 26px; text-align: center; background: #fff; color: #222; border-radius: 6px; padding: 1px 8px; font-weight: 700; box-shadow: 0 3px 0 #999; font-size: 13px; }
 .history-row { display: grid; grid-template-columns: 1.2fr 1.2fr 0.8fr 0.6fr 0.6fr; gap: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.04); margin-bottom: 4px; font-size: 14px; }
 

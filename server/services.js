@@ -6,8 +6,8 @@ import { Friends } from './friends.js';
 import { Parties } from './party.js';
 import { Chat } from './chat.js';
 
-export function createServices({ io, hub }) {
-  const services = {};
+export function createServices({ io, hub, opts = {} }) {
+  const services = { config: opts.matchConfig || {} };
   services.profiles = new Profiles({ hub, services });
   services.economy = new Economy({ hub, services });
   services.friends = new Friends({ hub, services });

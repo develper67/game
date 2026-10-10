@@ -9,7 +9,7 @@ class BattleBase {
   }
 
   onStart() {
-    this.endsAt = Date.now() + this.m.modeDef.duration * 1000;
+    this.endsAt = Date.now() + this.m.duration * 1000;
     this.m.broadcastMode();
   }
 

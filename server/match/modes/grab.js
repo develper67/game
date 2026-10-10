@@ -16,7 +16,7 @@ export class GrabMode {
   }
 
   onStart() {
-    this.endsAt = Date.now() + this.m.modeDef.duration * 1000;
+    this.endsAt = Date.now() + this.m.duration * 1000;
     this.respawnItem(true);
   }
 

@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node --test tests/",
+    "test": "node --test",
     "previews": "node tools/render-previews.mjs"
   },
   "engines": {
