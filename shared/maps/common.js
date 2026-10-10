@@ -42,11 +42,11 @@ export function overlay(b, x0, z0, x1, z1, m, c, y = 0.015) {
   b.box(Math.min(x0, x1), 0, Math.min(z0, z1), Math.max(x0, x1), y, Math.max(z0, z1), m, c, { col: false });
 }
 
-export function roadX(b, x0, x1, z, w, c = 0x4a4a4f, lines = true) {
+export function roadX(b, x0, x1, z, w, c = 0x8a8a90, lines = true) {
   overlay(b, x0, z - w / 2, x1, z + w / 2, 'asphalt', c, 0.02);
   if (lines) for (let x = x0 + 2; x < x1 - 2; x += 6) overlay(b, x, z - 0.12, x + 3, z + 0.12, 'paint', 0xf5f5dc, 0.03);
 }
-export function roadZ(b, z0, z1, x, w, c = 0x4a4a4f, lines = true) {
+export function roadZ(b, z0, z1, x, w, c = 0x8a8a90, lines = true) {
   overlay(b, x - w / 2, z0, x + w / 2, z1, 'asphalt', c, 0.02);
   if (lines) for (let z = z0 + 2; z < z1 - 2; z += 6) overlay(b, x - 0.12, z, x + 0.12, z + 3, 'paint', 0xf5f5dc, 0.03);
 }

@@ -110,6 +110,7 @@ export function garage(F, o = {}) {
   // rolled-up garage door
   F.box(-hw + 0.8, 2.95, -hd - 0.05, hw - 0.8, 3.45, -hd + 0.4, 'metal', o.doorC ?? 0xc0392b, { col: false });
   F.slab(-hw - 0.2, -hd - 0.2, hw + 0.2, hd + 0.2, h + 0.05 + 0.25, 0.25, 'roofflat', o.roofC ?? 0x5d6d7e);
+  F.box(-hw + T, h + 0.02, -hd + T, hw - T, h + 0.05, hd - T, 'planks', 0xd9cfbd, { col: false });
   if (o.car !== false) F.prop('car', -0.6, 0.05, -0.4, 0, 1, { color: o.carC ?? F.b.rng.pick([0x2e86de, 0xe74c3c, 0xf1c40f, 0x27ae60, 0x8e44ad]) });
   F.bench(hw - T - 0.5, 0.05, 1.2, 1);
   F.container('toolbox', hw - T - 0.35, 0.05, -1.5, 1, 1);
@@ -151,6 +152,12 @@ export function warehouse(F, o = {}) {
   F.box(-hw - 0.2, roofY - 0.3, -2, -hw + 3, roofY, 2, 'roofflat', o.roofC ?? 0x566573);
   F.box(hw - 3, roofY - 0.3, -2, hw + 0.2, roofY, 2, 'roofflat', o.roofC ?? 0x566573);
   F.box(-hw + 3, roofY - 0.12, -2, hw - 3, roofY - 0.06, 2, 'glass', 0xcfe9ff, { glass: true });
+  // lighter ceiling boards under the roof so the hall interior isn't gloomy
+  const cy0 = roofY - 0.33, cy1 = roofY - 0.3, cc = o.ceilC ?? 0xd9cfbd;
+  F.box(-hw + T, cy0, -hd + T, hw - T, cy1, -2, 'planks', cc, { col: false });
+  F.box(-hw + T, cy0, 2, hw - T, cy1, hd - T, 'planks', cc, { col: false });
+  F.box(-hw + T, cy0, -2, -hw + 3, cy1, 2, 'planks', cc, { col: false });
+  F.box(hw - 3, cy0, -2, hw - T, cy1, 2, 'planks', cc, { col: false });
   // mezzanine along back-left
   const mzY = 3.4, mzD = 4.2;
   const mx0 = -hw + T, mx1 = -hw + w * 0.55;
@@ -196,6 +203,7 @@ export function cabin(F, o = {}) {
   F.wallZ(-hd + T, hd - T, -hw + T / 2, 0.25, h, T, 'logs', logC, [WIN((d - 2 * T) / 2 - 0.6, 1.2, 1.0, 2.0)]);
   F.wallZ(-hd + T, hd - T, hw - T / 2, 0.25, h, T, 'logs', logC, []);
   F.slab(-hw - 0.2, -hd - 0.2, hw + 0.2, hd + 0.2, h + 0.25 + 0.15, 0.15, 'planks', 0x6e4a2a);
+  F.box(-hw + T, h + 0.22, -hd + T, hw - T, h + 0.25, hd - T, 'planks', 0xc8a879, { col: false });
   F.prism(-hw - 0.5, -hd - 0.6, hw + 0.5, hd + 0.6, h + 0.4, 1.9, true, 'roof', o.roofC ?? 0x4a3b30);
   if (o.snowRoof) F.prism(-hw - 0.55, -hd - 0.65, hw + 0.55, hd + 0.65, h + 0.5, 1.9, true, 'snow', 0xffffff);
   // fireplace

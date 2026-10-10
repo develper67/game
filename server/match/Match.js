@@ -496,6 +496,7 @@ export class Match {
           if (p.hist.length > 4 * 24) p.hist.splice(0, 4);
         }
         if (this.state === 'playing') this.mode.tick(dt, now);
+        if (!this.lastScores || now - this.lastScores >= 1000) { this.lastScores = now; this.sendScores(); }
       }
       if (this.state === 'playing' || this.state === 'countdown' || this.state === 'ended') this.sendSnapshot(now);
     } catch (e) {
@@ -515,6 +516,15 @@ export class Match {
       arr.push(p.num, r2(p.x), r2(p.y), r2(p.z), r3(p.yaw), r3(p.pitch), f);
     }
     this.io.to(this.room).volatile.emit('s', { t: now, p: arr });
+  }
+
+  sendScores() {
+    const sc = {};
+    for (const p of this.byNum) {
+      const s = p.stats;
+      sc[p.num] = { elims: s.elims, tags: s.tags, passes: s.passes, held: Math.round(s.heldTime), steals: s.steals, itTime: Math.round(s.itTime), damage: Math.round(s.damage), crafted: s.crafted, rounds: s.roundsSurvived };
+    }
+    this.broadcast('sc', sc);
   }
 
   onFell(p) {

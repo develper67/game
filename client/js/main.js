@@ -1,0 +1,204 @@
+// yoink! client entry: screen routing, session, realtime event wiring.
+import { api, session } from './api.js';
+import { Net } from './net.js';
+import { audio } from './audio.js';
+import { ChatStore } from './chat.js';
+import { h, mount, toast, modal, confirmBox } from './util/dom.js';
+import { AuthScreen } from './ui/auth.js';
+import { MenuScreen } from './ui/menu.js';
+import { VoteScreen } from './ui/vote.js';
+import { LoadingScreen } from './ui/loading.js';
+import { ResultsScreen } from './ui/results.js';
+import { settingsPanel, controlsPanel } from './ui/settings.js';
+import { Social } from './social.js';
+import { Game } from './game/Game.js';
+
+class App {
+  constructor() {
+    this.root = document.getElementById('app');
+    this.screen = null;
+    this.user = null;
+    this.net = null;
+    this.game = null;
+    this.chat = new ChatStore(this);
+    this.social = new Social(this);
+    this.queue = null;
+    this.lastMode = 'tag';
+    this.listeners = new Set();
+  }
+
+  async boot() {
+    const unlock = () => { audio.init(); if (!this.game) audio.startMusic(); };
+    document.addEventListener('pointerdown', unlock);
+    document.addEventListener('keydown', unlock);
+    document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('.btn')) audio.play('click'); });
+    const token = session.token;
+    if (token) {
+      const me = await api.me();
+      if (me.user) return this.enter(me.user);
+      session.clear();
+    }
+    this.showAuth();
+  }
+
+  // ---------------------------------------------------------------- state
+  on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
+  changed(what) { for (const fn of this.listeners) { try { fn(what); } catch (e) { console.error(e); } } }
+
+  setUser(u) { this.user = { ...this.user, ...u }; this.changed('user'); }
+
+  setScreen(screen) {
+    if (this.screen && this.screen.destroy) this.screen.destroy();
+    this.screen = screen;
+    this.root.classList.remove('hidden');
+    mount(this.root, screen.el);
+    if (screen.mounted) screen.mounted();
+  }
+
+  // ---------------------------------------------------------------- auth
+  showAuth(message) {
+    if (this.net) { this.net.close(); this.net = null; }
+    this.user = null;
+    this.setScreen(new AuthScreen(this, message));
+  }
+
+  async onAuthed(token, user, remember) {
+    session.save(token, remember);
+    await this.enter(user);
+  }
+
+  async enter(user) {
+    this.user = user;
+    if (this.net) this.net.close();
+    this.net = new Net(session.token);
+    this.bindNet();
+    try {
+      await this.net.connect();
+    } catch {
+      session.clear();
+      this.showAuth('Your session has expired. Please log in again.');
+      return;
+    }
+    if (!this.game) this.showMenu();
+  }
+
+  async logout() {
+    if (this.game) return toast('Leave the match first.', 'error');
+    await api.logout();
+    session.clear();
+    this.social.reset();
+    this.showAuth('You have been logged out.');
+  }
+
+  bindNet() {
+    const net = this.net;
+    this.chat.bind(net);
+    this.social.bind(net);
+    net.on('hello', (d) => { this.setUser(d.user); });
+    net.on('net:unauthorized', () => { session.clear(); this.showAuth('Your session is no longer valid. Please log in again.'); });
+    net.on('auth:kicked', (d) => { this.disposeGame(); session.clear(); this.showAuth(d.reason || 'Disconnected.'); });
+    net.on('auth:logout', () => { this.disposeGame(); session.clear(); this.showAuth('You were logged out.'); });
+    net.on('user:update', (u) => this.setUser(u));
+    net.on('queue:update', (q) => { this.queue = q; this.changed('queue'); });
+    net.on('queue:left', () => { this.queue = null; this.changed('queue'); });
+    net.on('match:vote', (d) => this.onVote(d));
+    net.on('match:load', (d) => this.onLoad(d));
+    net.on('match:end', (d) => this.onEnd(d));
+    net.on('net:disconnect', () => this.changed('net'));
+    net.on('net:connect', () => this.changed('net'));
+  }
+
+  // ---------------------------------------------------------------- screens
+  showMenu(tab) {
+    if (this.screen instanceof MenuScreen) { if (tab) this.screen.setTab(tab); return; }
+    this.setScreen(new MenuScreen(this, tab));
+    audio.startMusic();
+  }
+
+  onVote(d) {
+    this.queue = null;
+    this.lastMode = d.mode;
+    this.lastPractice = d.practice;
+    if (this.screen instanceof VoteScreen && this.screen.matchId === d.matchId) this.screen.update(d);
+    else this.setScreen(new VoteScreen(this, d));
+  }
+
+  async onLoad(d) {
+    this.queue = null;
+    this.lastMode = d.mode;
+    this.lastPractice = d.practice;
+    if (this.game && this.game.matchId === d.matchId && !this.game.disposed) {
+      // reconnected to the same match: ask for a fresh snapshot
+      this.net.emit('match:ready');
+      return;
+    }
+    this.disposeGame();
+    audio.stopMusic();
+    const loading = new LoadingScreen(this, d);
+    this.setScreen(loading);
+    const game = new Game(this);
+    this.game = game;
+    try {
+      await game.load(d, (p, label) => loading.progress(p, label));
+      this.root.classList.add('hidden');
+    } catch (e) {
+      console.error(e);
+      toast('Failed to load the match: ' + e.message, 'error');
+      this.net.emit('match:leave');
+      this.disposeGame();
+      this.showMenu();
+    }
+  }
+
+  onEnd(d) {
+    const g = this.game;
+    const me = d.results.find((r) => r.num === d.you);
+    const won = me && me.won;
+    if (d.profile) this.setUser(d.profile);
+    audio.play(won ? 'win' : 'lose');
+    if (g && !g.disposed) {
+      g.end();
+      g.hud.center(won ? '🏆 VICTORY!' : 'DEFEAT', d.reason, 3000);
+      if (won) g.effects.confetti(g.camera.position.x, g.camera.position.y + 1, g.camera.position.z, 150);
+      setTimeout(() => { if (this.game === g) this.disposeGame(); this.setScreen(new ResultsScreen(this, d)); }, 2600);
+    } else {
+      this.setScreen(new ResultsScreen(this, d));
+    }
+  }
+
+  disposeGame() {
+    if (this.game) { this.game.dispose(); this.game = null; }
+    this.root.classList.remove('hidden');
+  }
+
+  async leaveMatchConfirm() {
+    const ok = await confirmBox('Leave match?', 'You will forfeit this match and earn no rewards for it.', 'Leave', 'red');
+    if (!ok) return;
+    this.net.emit('match:leave');
+    this.disposeGame();
+    this.showMenu();
+  }
+
+  // ---------------------------------------------------------------- shared actions
+  async play(mode, practice) {
+    this.lastMode = mode;
+    this.lastPractice = practice;
+    const r = await this.net.request('queue:join', { mode, practice });
+    if (r.error) { toast(r.error, 'error'); audio.play('error'); return false; }
+    return true;
+  }
+
+  openSettingsModal() {
+    modal('Settings', settingsPanel(this, { compact: true }), [{ label: 'Done', class: 'green' }]);
+  }
+
+  showControls() { modal('Controls', controlsPanel(), [{ label: 'Close', class: 'green' }]); }
+
+  showProfile(username) { this.social.showProfile(username); }
+}
+
+const app = new App();
+window.__yoink = app; // handy for debugging in the console
+app.boot();
+
+export { h };
