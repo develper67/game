@@ -1,0 +1,7 @@
+node_modules/
+data/*.db
+data/*.db.tmp
+data/*.bak
+*.log
+.DS_Store
+tests/output/

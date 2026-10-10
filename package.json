@@ -1,0 +1,28 @@
+{
+  "name": "yoink",
+  "version": "1.0.0",
+  "description": "yoink! — a first-person 3D multiplayer party game (Three.js + Node.js + Socket.IO)",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test tests/",
+    "previews": "node tools/render-previews.mjs"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "compression": "^1.8.2",
+    "express": "^4.22.3",
+    "socket.io": "^4.8.4",
+    "sql.js": "^1.14.2",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.56.1",
+    "socket.io-client": "^4.8.4"
+  }
+}
