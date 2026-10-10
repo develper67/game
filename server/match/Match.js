@@ -178,10 +178,7 @@ export class Match {
   start() {
     const secs = this.cfg.voteSeconds ?? (this.practice ? MATCH.PRACTICE_VOTE_SECONDS : MATCH.VOTE_SECONDS);
     this.voteEndsAt = Date.now() + secs * 1000;
-    // Bots vote at random moments
-    for (const p of this.byNum) if (p.isBot) {
-      setTimeout(() => { if (this.state === 'voting') this.onVote(p, MAP_IDS[Math.floor(Math.random() * MAP_IDS.length)]); }, 800 + Math.random() * (secs * 700));
-    }
+    // Only humans vote; bots go wherever the players choose (no votes at all = random map).
     this.sendVoteState();
     this.timer = setInterval(() => this.tick(), TICK_MS);
   }

@@ -53,7 +53,7 @@ export class ChatStore {
 
   renderLine(m, opts = {}) {
     const line = h('div', { class: 'chat-line' + (m.system ? ' sys ' + (m.kind || 'info') : '') });
-    if (!opts.compact) line.appendChild(h('span', { class: 't', text: fmtClock(m.at) }));
+    line.appendChild(h('span', { class: 't', text: fmtClock(m.at) }));
     if (m.channel === 'gameparty' || (opts.showChannel && m.channel)) line.appendChild(h('span', { class: 'ch', text: CHANNEL_LABEL[m.channel] || m.channel }));
     if (m.system) {
       line.appendChild(document.createTextNode(m.text));

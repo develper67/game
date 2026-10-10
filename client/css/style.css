@@ -374,7 +374,7 @@ a { color: var(--cyan); }
 
 /* panels over the game (pause, inventory, craft) */
 .game-panel { position: absolute; inset: 0; background: rgba(5, 0, 20, 0.62); display: flex; align-items: center; justify-content: center; pointer-events: auto; z-index: 5; }
-.game-panel .card { min-width: 380px; }
+.game-panel .card { min-width: 380px; max-height: 92vh; overflow-y: auto; }
 .pause-menu { display: flex; flex-direction: column; gap: 12px; width: 340px; text-align: center; }
 .pause-menu h2 { margin: 0 0 6px; font-size: 32px; }
 .inv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; width: min(940px, 94vw); }

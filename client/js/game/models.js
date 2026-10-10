@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SKINS, THEMES } from '/shared/skins.js';
-import { patternTexture } from './textures.js';
+import { patternTexture, labelTexture } from './textures.js';
 
 const _c = new THREE.Color();
 
@@ -484,8 +484,10 @@ export function benchModel() {
   });
   const g = new THREE.Group();
   g.add(new THREE.Mesh(geo, vcMaterial()));
-  // floating hammer+wrench sign
-  const sign = new THREE.Mesh(new THREE.CircleGeometry(0.28, 20), new THREE.MeshBasicMaterial({ color: 0x4cc9f0, transparent: true, opacity: 0.9 }));
+  // floating "CRAFT" sign (shown in Scavenge & Craft)
+  const label = labelTexture('🛠 CRAFT', { color: '#06283a', bg: 'rgba(76,201,240,0.92)' });
+  const sign = new THREE.Sprite(new THREE.SpriteMaterial({ map: label.tex, transparent: true }));
+  sign.scale.set(0.3 * label.aspect, 0.3, 1);
   sign.position.set(0, 2.2, 0);
   g.add(sign);
   g.userData.sign = sign;

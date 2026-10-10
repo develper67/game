@@ -652,7 +652,8 @@ export class Game {
     this.ads = !!(w && inp.buttons.has(2) && this.combat);
     if (w && this.combat) {
       const def = WEAPONS[w.t];
-      const want = def.auto ? inp.buttons.has(0) : inp.clicked.has(0);
+      // a quick click (press + release inside one frame) still fires one shot
+      const want = def.auto ? (inp.buttons.has(0) || inp.clicked.has(0)) : inp.clicked.has(0);
       if (want) this.tryShoot(w, def);
     } else if (inp.clicked.has(0) || (inp.buttons.has(0) && this.mode !== 'tag' && this.mode !== 'hotpotato' && performance.now() - this.lastPunch > FISTS.interval * 1000 + 50)) {
       this.tryPunch();
@@ -958,7 +959,6 @@ export class Game {
       const s = bn.model.userData.sign;
       s.visible = this.crafting;
       s.position.y = 2.2 + Math.sin(t * 2) * 0.08;
-      s.lookAt(this.camera.position);
     }
     if (this.worldObjs.table) {
       this.worldObjs.table.visible = this.mode === 'grab';

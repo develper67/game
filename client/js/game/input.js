@@ -24,12 +24,13 @@ export class Input {
     };
     this._onKeyUp = (e) => { this.keys.delete(e.code); };
     this._onMouseMove = (e) => {
-      if (!this.locked) return;
+      if (!this.locked || (window.__YOINK_TEST__ && !document.pointerLockElement)) return;
       this.mouseDX += e.movementX || 0;
       this.mouseDY += e.movementY || 0;
     };
     this._onMouseDown = (e) => {
-      if (!this.locked || (window.__YOINK_TEST__ && e.target !== this.el)) return;
+      // with real pointer lock all mouse events go to the canvas; automated tests click the game area instead
+      if (!this.locked || (window.__YOINK_TEST__ && !(e.target && e.target.closest && e.target.closest('#game-root')))) return;
       this.buttons.add(e.button);
       this.clicked.add(e.button);
       e.preventDefault();

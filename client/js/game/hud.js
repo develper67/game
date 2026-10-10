@@ -41,7 +41,7 @@ export class Hud {
     this.fpsEl = h('div', { class: 'fps hidden' });
     this.netEl = h('div', { class: 'netwarn hidden', text: 'Connection lost — reconnecting…' });
     this.scoreEl = h('div', { class: 'scoreboard hidden' });
-    this.pickupFeed = h('div', { style: { position: 'absolute', right: '20px', bottom: '240px', display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-end' } });
+    this.pickupFeed = h('div', { style: { position: 'absolute', right: '20px', bottom: '300px', display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-end' } });
     this.root.append(this.vignette, this.markers, this.crosshair, this.hitmarkerEl, this.top, this.killfeed, this.vitals, this.livesEl, this.heals, this.hotbar,
       this.ammoEl, this.matsEl, this.promptEl, this.progressEl, this.countdownEl, this.centerEl, this.spectateEl, this.fpsEl, this.netEl, this.scoreEl, this.pickupFeed);
     this.markerEls = new Map();

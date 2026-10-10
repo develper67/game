@@ -53,11 +53,12 @@ async function startPractice(s, mode, map = 'forest') {
   s.emit('match:vote', map);
   await waitFor(s, 'match:vote', (d) => d.players.find((p) => p.num === d.you).vote === map);
   const load = await waitFor(s, 'match:load');
-  // the loaded map must be one of the most-voted maps (ties are broken randomly)
+  // the loaded map must be the most-voted map (only humans vote)
   const votes = s.events.filter(([e]) => e === 'match:vote').map(([, d]) => d);
   const last = votes[votes.length - 1];
   const max = Math.max(...Object.values(last.counts));
   assert.ok(last.counts[load.mapId] === max, `loaded ${load.mapId} but votes were ${JSON.stringify(last.counts)}`);
+  assert.equal(load.mapId, map, 'my vote decides when I am the only voter');
   s.emit('match:ready');
   const init = await waitFor(s, 'match:init');
   return { load, init };
