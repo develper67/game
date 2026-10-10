@@ -64,3 +64,19 @@ export function spawnRing(b, cx, cz, radius, n, y = 0.1, reserve) {
     b.spawn(x, y, z, Math.atan2(x - cx, z - cz));
   }
 }
+
+// Floor slab over [x0,x1]x[z0,z1] (top at y) with rectangular holes [[hx0,hz0,hx1,hz1],...]
+export function slabWithHoles(b, x0, z0, x1, z1, y, t, holes, m, c, flags) {
+  const xs = new Set([x0, x1]), zs = new Set([z0, z1]);
+  for (const [a, bb, cc, d] of holes) { xs.add(Math.max(x0, Math.min(x1, a))); xs.add(Math.max(x0, Math.min(x1, cc))); zs.add(Math.max(z0, Math.min(z1, bb))); zs.add(Math.max(z0, Math.min(z1, d))); }
+  const X = [...xs].sort((p, q) => p - q), Z = [...zs].sort((p, q) => p - q);
+  const inHole = (cx, cz) => holes.some(([a, bb, cc, d]) => cx > a && cx < cc && cz > bb && cz < d);
+  for (let j = 0; j < Z.length - 1; j++) {
+    let start = null;
+    for (let i = 0; i <= X.length - 1; i++) {
+      const filled = i < X.length - 1 && !inHole((X[i] + X[i + 1]) / 2, (Z[j] + Z[j + 1]) / 2);
+      if (filled && start === null) start = X[i];
+      if (!filled && start !== null) { b.box(start, y - t, Z[j], X[i], y, Z[j + 1], m, c, flags); start = null; }
+    }
+  }
+}

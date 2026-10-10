@@ -1,6 +1,7 @@
 // GRAB THE ITEM: grab the Golden Rubber Chicken and deliver it to the winning
 // table. Punch the carrier to knock it loose. First delivery wins.
 const DELIVER_TIME = 2.0; // seconds the carrier must stay at the table
+const PROTECT_MS = 1500; // a fresh carrier can't be knocked loose right away
 
 export class GrabMode {
   constructor(m) {
@@ -41,7 +42,8 @@ export class GrabMode {
     this.item.carrier = p;
     this.deliverT = 0;
     if (p) {
-      p.speedMul = 0.82;
+      p.speedMul = 0.88;
+      this.protectedUntil = Date.now() + PROTECT_MS;
       this.item.state = 'carried';
     }
   }
@@ -93,7 +95,10 @@ export class GrabMode {
 
   onPunch(a, t) {
     this.m.knockback(t, a, 6, 3.4);
-    if (t === this.item.carrier) this.drop(t, a);
+    if (t === this.item.carrier) {
+      if (Date.now() < this.protectedUntil) { this.m.emitTo(a, 'ev', { k: 'toast', text: 'They just grabbed it — wait a moment!' }); return true; }
+      this.drop(t, a);
+    }
     return true;
   }
 
@@ -143,7 +148,7 @@ export class GrabMode {
   state() {
     const it = this.item;
     return {
-      mode: 'grab', endsAt: this.endsAt, deliverStart: this.deliverT > 0 ? Date.now() - this.deliverT * 1000 : 0, deliverTime: DELIVER_TIME,
+      mode: 'grab', endsAt: this.endsAt, protectedUntil: this.protectedUntil || 0, deliverStart: this.deliverT > 0 ? Date.now() - this.deliverT * 1000 : 0, deliverTime: DELIVER_TIME,
       item: { state: it.state, carrier: it.carrier ? it.carrier.num : -1, x: Math.round(it.x * 100) / 100, y: Math.round(it.y * 100) / 100, z: Math.round(it.z * 100) / 100 },
       table: { x: this.table.x, y: this.table.y, z: this.table.z, r: this.table.r },
     };

@@ -170,7 +170,7 @@ export class NavGrid {
   }
 
   // Closest node to a world position (prefers the level just below the feet)
-  nearest(x, y, z, maxRing = 6) {
+  nearest(x, y, z, maxRing = 8) {
     const i0 = Math.floor((x - this.minX) / CELL), j0 = Math.floor((z - this.minZ) / CELL);
     let best = -1, bestD = Infinity;
     for (let ring = 0; ring <= maxRing; ring++) {
@@ -189,7 +189,8 @@ export class NavGrid {
           }
         }
       }
-      if (best !== -1 && ring >= 1) break;
+      // nodes in the next ring are at least (ring * CELL) away horizontally
+      if (best !== -1 && (ring * CELL) * (ring * CELL) > bestD) break;
     }
     return best;
   }
@@ -197,7 +198,10 @@ export class NavGrid {
   sameComponent(a, b) { return a >= 0 && b >= 0 && this.comp[a] === this.comp[b]; }
 
   // A* path. Returns array of node indices (start..goal) or null.
-  findPath(start, goal, maxExpand = 40000) {
+  // Weighted A* (w > 1 trades a little optimality for far fewer expansions).
+  // Sets this.lastPartial when the goal could not be reached within the budget.
+  findPath(start, goal, maxExpand = 60000, w = 1.6) {
+    this.lastPartial = false;
     if (start < 0 || goal < 0) return null;
     if (this.comp[start] !== this.comp[goal]) return null;
     if (start === goal) return [start];
@@ -206,7 +210,7 @@ export class NavGrid {
     const gp = this.nodePos(goal);
     const heap = new MinHeap();
     visit[start] = stamp; g[start] = 0; came[start] = -1;
-    heap.push(start, this._h(start, gp));
+    heap.push(start, this._h(start, gp) * w);
     let expanded = 0;
     let bestNode = start, bestH = Infinity;
     while (heap.size) {
@@ -223,11 +227,12 @@ export class NavGrid {
         const ng = g[u] + this.eCost[e];
         if (visit[v] !== stamp || ng < g[v]) {
           visit[v] = stamp; g[v] = ng; came[v] = u;
-          heap.push(v, ng + this._h(v, gp));
+          heap.push(v, ng + this._h(v, gp) * w);
         }
       }
     }
     // partial path towards the best node found
+    this.lastPartial = true;
     return bestNode !== start ? this._reconstruct(bestNode) : null;
   }
 

@@ -57,6 +57,15 @@ const PROP_BUILDERS = {
     const l = new MB().cone(1.7, 2.4, 7, 0, 2.6, 0, 0xffffff).cone(1.35, 2.1, 7, 0, 3.6, 0, 0xffffff).cone(0.95, 1.8, 7, 0, 4.6, 0, 0xffffff).build();
     return layers({ geo: t }, { geo: l, tint: true, base: PINE });
   },
+  snowpine() {
+    const t = new MB().cyl(0.18, 0.28, 1.6, 6, 0, 0.8, 0, TRUNK).build();
+    const l = new MB().cone(1.7, 2.4, 7, 0, 2.6, 0, 0xffffff).cone(1.35, 2.1, 7, 0, 3.6, 0, 0xffffff).cone(0.95, 1.8, 7, 0, 4.6, 0, 0xffffff).build();
+    const snow = new MB().cone(1.25, 0.9, 7, 0, 3.35, 0, 0xffffff).cone(0.95, 0.8, 7, 0, 4.3, 0, 0xffffff).cone(0.62, 0.75, 7, 0, 5.2, 0, 0xffffff).cone(1.72, 0.25, 7, 0, 1.55, 0, 0xffffff).build();
+    return layers({ geo: t }, { geo: l, tint: true, base: 0x2e5e4a }, { geo: snow, base: 0xffffff });
+  },
+  dish() {
+    return layers({ geo: new MB().cyl(0.15, 0.25, 2.2, 8, 0, 1.1, 0, 0x90a4ae).sphere(1.4, 0, 2.6, -0.2, 0xeceff1, 1, 1, 0.35, 14, 8).cyl(0.04, 0.04, 1.2, 6, 0, 2.6, -0.8, 0x607d8b, Math.PI / 2, 0, 0).build() });
+  },
   tree() {
     const t = new MB().cyl(0.2, 0.3, 2.2, 6, 0, 1.1, 0, TRUNK).build();
     const l = new MB().ico(1.5, 0, 3.0, 0, 0xffffff, 1, 0.9, 1, 1).ico(1.0, 0.8, 3.6, 0.3, 0xffffff, 1, 1, 1, 0).ico(1.0, -0.7, 3.4, -0.4, 0xffffff, 1, 1, 1, 0).build();

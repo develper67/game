@@ -132,6 +132,18 @@ export class Frame {
       this.box(lx0, y0, Math.min(za, zb), lx1, y0 + sh * (i + 1), Math.max(za, zb), m, c, { vis: false, stair: true });
     }
   }
+  // Smooth ramp along local +X (dir=1) or -X (dir=-1)
+  rampX(lz0, lz1, lx, y0, height, run, dir, m, c) {
+    const [x0, z0, x1, z1] = this.rect(Math.min(lx, lx + dir * run), lz0, Math.max(lx, lx + dir * run), lz1);
+    const [dx, dz] = rotXZ(dir, 0, this.r);
+    this.b.ramps.push({ x0, z0, x1, z1, y0: this.oy + y0, h: height, dx, dz, m, c });
+    const n = Math.max(3, Math.ceil(height / 0.12));
+    const sh = height / n, sd = run / n;
+    for (let i = 0; i < n; i++) {
+      const xa = lx + dir * i * sd, xb = lx + dir * (i + 1) * sd;
+      this.box(Math.min(xa, xb), y0, lz0, Math.max(xa, xb), y0 + sh * (i + 1), lz1, m, c, { vis: false, stair: true });
+    }
+  }
   point(lx, ly, lz) {
     const [x, z] = this.pt(lx, lz);
     return { x, y: this.oy + ly, z };
@@ -284,6 +296,8 @@ export const CONTAINER_DIMS = {
 // Collider boxes for props, in local units relative to (x,y,z) before scale: [x0,y0,z0,x1,y1,z1]
 export const PROP_COLLIDERS = {
   pine: [[-0.3, 0, -0.3, 0.3, 4, 0.3]],
+  snowpine: [[-0.3, 0, -0.3, 0.3, 4, 0.3]],
+  dish: [[-0.4, 0, -0.4, 0.4, 3.0, 0.4]],
   tree: [[-0.3, 0, -0.3, 0.3, 3.5, 0.3]],
   deadtree: [[-0.25, 0, -0.25, 0.25, 3.5, 0.25]],
   palm: [[-0.25, 0, -0.25, 0.25, 4, 0.25]],

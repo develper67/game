@@ -147,7 +147,12 @@ export class BotBrain {
       if (Math.hypot(np.x - p.x, np.z - p.z) < 0.45 && Math.abs(np.y - p.y) < 1.1) this.pi++;
       else break;
     }
-    if (this.pi >= this.path.length) { this.path = null; return { x: g.x, z: g.z }; }
+    if (this.pi >= this.path.length) {
+      // reached the end of a partial path without getting to the goal: give up on it for a while
+      if (this.pathPartial && (Math.hypot(g.x - p.x, g.z - p.z) > 2.5 || Math.abs(g.y - p.y) > 1.8)) { this.markUnreachable(); return null; }
+      this.path = null;
+      return { x: g.x, z: g.z };
+    }
     const np = nav.nodePos(this.path[this.pi]);
     const jump = np.y - p.y > 0.5 && Math.hypot(np.x - p.x, np.z - p.z) < 1.4;
     return { x: np.x, z: np.z, jump };
@@ -161,9 +166,11 @@ export class BotBrain {
     this.repathAt = now + (this.goal && this.goal.player ? 700 : 2500) + Math.random() * 300;
     if (a < 0 || b < 0) { this.path = null; return; }
     if (!nav.sameComponent(a, b)) { this.path = null; this.markUnreachable(); return; }
-    this.path = nav.findPath(a, b, 25000);
+    this.path = nav.findPath(a, b, 60000);
+    this.pathPartial = nav.lastPartial;
     this.pi = 0;
     if (this.path) this.smooth();
+    else this.markUnreachable();
   }
 
   // skip waypoints we can walk to in a straight line on the same level
@@ -205,6 +212,7 @@ export class BotBrain {
   markUnreachable() {
     if (this.goal && this.goal.key) this.ignore.set(this.goal.key, Date.now() + 20000);
     this.goal = null;
+    this.path = null;
   }
 
   goalPos() {
@@ -309,6 +317,16 @@ export class BotBrain {
 
   // ------------------------------------------------------------ decision making
   think(now) {
+    const ac = this.arriveCheck;
+    if (ac && now >= ac.at) {
+      this.arriveCheck = null;
+      const k = ac.key;
+      let stillThere = false;
+      if (k.startsWith('loot')) stillThere = this.m.loot.has(+k.slice(4));
+      else if (k.startsWith('cont')) { const st = this.m.containers.get(k.slice(4)); stillThere = !!st && !st.opened; }
+      else if (k.startsWith('res')) { const st = this.m.resources.get(k.slice(3)); stillThere = false && st; }
+      if (stillThere && !this.p.search) this.ignore.set(k, now + 15000);
+    }
     this.aimOverride = false;
     this.strafe = false;
     this.desiredPitch = 0;
@@ -487,7 +505,7 @@ export class BotBrain {
     if (lootGoal) return;
     // hunt
     const target = this.nearestOther();
-    if (target && (this.hasUsableGun() || Math.random() < 0.5)) {
+    if (target && (this.hasUsableGun() || this.allLooted || Math.random() < 0.5)) {
       this.sprint = true;
       this.setGoal({ player: target, key: 'hunt' + target.num });
     } else this.wander(now);
@@ -551,19 +569,15 @@ export class BotBrain {
         consider('res' + r.id, r.x, r.y, r.z, 1.6, () => this.m.use(p, { k: 'res', id: r.id }));
       }
     }
+    this.allLooted = !best;
     if (!best) return false;
     if (!needGun && bestScore > 25) return false; // nothing worth the trip
     this.sprint = true;
     this.setGoal({ x: best.x, y: best.y, z: best.z, key: best.key });
     if (Math.hypot(best.x - p.x, best.z - p.z) < 1.9 && Math.abs(best.y - p.y) < 1.8) {
       best.onArrive();
-      // if nothing happened (e.g. container being searched by someone else) avoid it for a while
-      setTimeout(() => {
-        if (!p.search && (this.m.loot.has(+best.key.slice(4)) || best.key.startsWith('cont'))) {
-          const st = best.key.startsWith('cont') ? this.m.containers.get(best.key.slice(4)) : null;
-          if (!st || !st.opened) this.ignore.set(best.key, Date.now() + 15000);
-        }
-      }, 1800);
+      // if nothing happened (e.g. someone else is searching it) avoid it for a while
+      if (!this.arriveCheck || this.arriveCheck.key !== best.key) this.arriveCheck = { key: best.key, at: now + 2200 };
     }
     return true;
   }

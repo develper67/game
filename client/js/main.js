@@ -197,8 +197,14 @@ class App {
   showProfile(username) { this.social.showProfile(username); }
 }
 
-const app = new App();
-window.__yoink = app; // handy for debugging in the console
-app.boot();
+const previewMap = new URLSearchParams(location.search).get('preview');
+if (previewMap) {
+  // tools/render-previews.mjs uses this to capture map thumbnails
+  import('./game/previewRender.js').then(({ renderPreview }) => { renderPreview(previewMap); window.__previewReady = true; });
+} else {
+  const app = new App();
+  window.__yoink = app; // handy for debugging in the console
+  app.boot();
+}
 
 export { h };

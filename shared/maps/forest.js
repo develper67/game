@@ -132,6 +132,12 @@ export function build() {
   // Street lamps
   for (let x = -54; x <= 54; x += 18) { b.prop('lamp', x, 0, 4.6, 0, 1); b.prop('lamp', x + 9, 0, -4.6, Math.PI, 1); }
 
+  const spawns = [
+    [-30, 5.5, 0], [-12, 5.5, 0], [12, 5.5, 0], [30, 5.5, 0], [-30, -5.5, Math.PI], [-12, -5.5, Math.PI], [12, -5.5, Math.PI], [30, -5.5, Math.PI],
+    [-5.5, 22, 0], [5.5, -24, Math.PI], [-50, 0.5, -Math.PI / 2], [50, 0.5, Math.PI / 2], [-26, 28, 0], [26, -30, Math.PI], [0, 31, 0], [-52, -36, 0],
+  ];
+  for (const [x, z, yaw] of spawns) { b.spawn(x, 0.1, z, yaw); R.addCentered(x, z, 2.5, 2.5); }
+
   // Woods: dense pines around the edges, mixed trees closer to town
   const inTown = (x, z) => Math.abs(x) < 46 && z > -26 && z < 28;
   scatter(b, R, [-60, -60, 60, 60], 150, ['pine', 'pine', 'tree'], { r: 1.6, scale: [0.85, 1.4], avoid: (x, z) => !inTown(x, z) });
@@ -141,11 +147,6 @@ export function build() {
   scatter(b, R, [-60, -60, 60, 60], 40, ['flowers', 'grasstuft'], { r: 0.4, reserve: false });
 
   // Spawn points around town
-  const spawns = [
-    [-30, 5.5, 0], [-12, 5.5, 0], [12, 5.5, 0], [30, 5.5, 0], [-30, -5.5, Math.PI], [-12, -5.5, Math.PI], [12, -5.5, Math.PI], [30, -5.5, Math.PI],
-    [-5.5, 22, 0], [5.5, -24, Math.PI], [-50, 0.5, -Math.PI / 2], [50, 0.5, Math.PI / 2], [-26, 28, 0], [26, -30, Math.PI], [0, 31, 0], [-52, -36, 0],
-  ];
-  for (const [x, z, yaw] of spawns) b.spawn(x, 0.1, z, yaw);
 
   return b.build(meta);
 }

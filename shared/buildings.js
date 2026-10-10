@@ -182,7 +182,7 @@ export function warehouse(F, o = {}) {
   F.container('locker', mx1 - 1.2, mzY, hd - T - 0.45, 2, 1);
   F.bench(hw - T - 0.5, 0.05, hd - 4.5, 1);
   F.loot(0, 0.05, 0, 1, 'warehouse');
-  F.loot(hw - 3, 0.05, -2.5, 2, 'warehouse');
+  F.loot(hw * 0.5, 0.05, hd * 0.17 + 1.6, 2, 'warehouse');
   F.loot(-hw + 5, mzY, hd - T - 2.0, 2, 'warehouse');
   F.loot(-hw + 2, 0.05, -hd + 2, 1, 'warehouse');
   F.prop('pallet', hw - 4, 0.05, hd - 2, 0);
@@ -316,7 +316,7 @@ export function facility(F, o = {}) {
   }
   F.loot(-hw + 3, 0.1, 0, 1, 'corridor');
   F.loot(hw - 3, 0.1, 0, 1, 'corridor');
-  F.prop('vending', 0, 0.1, -cw / 2 + 0.45, 0);
+  F.prop('vending', 3.2, 0.1, -cw / 2 + 0.45, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -384,7 +384,7 @@ export function shop(F, o = {}) {
     { at: hw - 1.2, w: 2.4, y0: 0, y1: 3.0 },
     { at: hw + 1.4, w: hw - 1.8, y0: 0.4, y1: 3.0, glass: true },
   ]);
-  if (!o.noBackWall) F.wallX(-hw, hw, hd - 0.1, 0.08, h, 0.2, 'plaster', c, [{ at: w - 2, w: 1.1, y0: 0, y1: 2.3, door: { inside: -1, color: 0x7f8c8d } }]);
+  if (!o.noBackWall) F.wallX(-hw, hw, hd - 0.1, 0.08, h, 0.2, 'plaster', c, o.backDoor === false ? [] : [{ at: w - 2, w: 1.1, y0: 0, y1: 2.3, door: { inside: -1, color: 0x7f8c8d } }]);
   if (!o.noLeft) F.wallZ(-hd + 0.2, hd - 0.2, -hw + 0.1, 0.08, h, 0.2, 'plaster', c, []);
   if (!o.noRight) F.wallZ(-hd + 0.2, hd - 0.2, hw - 0.1, 0.08, h, 0.2, 'plaster', c, []);
   // sign above storefront
@@ -423,4 +423,50 @@ export function boundary(b, size, style = {}) {
   b.box(minX - th, h, maxZ, maxX + th, 40, maxZ + th, m, c, { vis: false });
   b.box(minX - th, h, minZ, minX, 40, maxZ, m, c, { vis: false });
   b.box(maxX, h, minZ, maxX + th, 40, maxZ, m, c, { vis: false });
+}
+
+// ---------------------------------------------------------------------------
+// Lookout tower: wooden platform on legs with a staircase and a little roof.
+// ---------------------------------------------------------------------------
+export function lookoutTower(F, o = {}) {
+  const h = o.h || 4.5, s = o.size || 4;
+  const hs = s / 2;
+  const c = o.color ?? 0x8d6e63;
+  for (const [x, z] of [[-hs, -hs], [hs - 0.3, -hs], [-hs, hs - 0.3], [hs - 0.3, hs - 0.3]]) F.box(x, 0, z, x + 0.3, h, z + 0.3, 'wood', c);
+  F.box(-hs, h - 0.2, -hs, hs, h, hs, 'planks', 0xa1887f);
+  // railings, leaving an opening where the stairs arrive (-Z side, left half)
+  F.box(-hs, h, hs - 0.1, hs, h + 1.0, hs, 'wood', c);
+  F.box(-hs, h, -hs, -hs + 0.1, h + 1.0, hs, 'wood', c);
+  F.box(hs - 0.1, h, -hs, hs, h + 1.0, hs, 'wood', c);
+  F.box(0.2, h, -hs, hs, h + 1.0, -hs + 0.1, 'wood', c);
+  // stairs rising toward +z, ending at the platform's -z edge
+  F.stairsZ(-hs + 0.15, 0.1, -hs - h * 1.15, 0, h, h * 1.15, 1, 'planks', 0xa1887f);
+  // roof on posts
+  for (const [x, z] of [[-hs, -hs], [hs - 0.15, -hs], [-hs, hs - 0.15], [hs - 0.15, hs - 0.15]]) F.box(x, h, z, x + 0.15, h + 2.4, z + 0.15, 'wood', c, { col: false });
+  F.prism(-hs - 0.3, -hs - 0.3, hs + 0.3, hs + 0.3, h + 2.4, 1.2, true, 'roof', o.roofC ?? 0x6d4c41);
+  F.loot(0, h, 0.3, o.tier ?? 1, 'tower');
+}
+
+// Gantry crane straddling a lane (visual beam, colliding legs)
+export function crane(F, o = {}) {
+  const span = o.span || 18, h = o.h || 16, c = o.color ?? 0xf4a300;
+  const hs = span / 2;
+  for (const x of [-hs, hs]) for (const z of [-3, 3]) F.box(x - 0.5, 0, z - 0.5, x + 0.5, h, z + 0.5, 'metal', c);
+  F.box(-hs - 0.6, h, -3.6, hs + 0.6, h + 1.4, 3.6, 'metal', c, { col: false });
+  F.box(-hs - 0.5, h * 0.35, -0.3, -hs + 0.5, h * 0.35 + 0.6, 0.3, 'metal', c, { col: false });
+  F.box(hs - 0.5, h * 0.35, -0.3, hs + 0.5, h * 0.35 + 0.6, 0.3, 'metal', c, { col: false });
+  F.box(-1.5, h - 2, -1.2, 1.5, h, 1.2, 'metal', 0x37474f, { col: false });
+  F.box(-0.05, 3, -0.05, 0.05, h - 2, 0.05, 'metal', 0x222222, { col: false });
+}
+
+// Bridge plank between two points along local X at height y
+export function bridgeX(F, x0, x1, z, y, w = 2.2, c = 0x8d6e63) {
+  F.box(x0, y - 0.25, z - w / 2, x1, y, z + w / 2, 'planks', c);
+  F.box(x0, y, z - w / 2, x1, y + 1.0, z - w / 2 + 0.08, 'metal', 0x37474f);
+  F.box(x0, y, z + w / 2 - 0.08, x1, y + 1.0, z + w / 2, 'metal', 0x37474f);
+}
+export function bridgeZ(F, z0, z1, x, y, w = 2.2, c = 0x8d6e63) {
+  F.box(x - w / 2, y - 0.25, z0, x + w / 2, y, z1, 'planks', c);
+  F.box(x - w / 2, y, z0, x - w / 2 + 0.08, y + 1.0, z1, 'metal', 0x37474f);
+  F.box(x + w / 2 - 0.08, y, z0, x + w / 2, y + 1.0, z1, 'metal', 0x37474f);
 }
