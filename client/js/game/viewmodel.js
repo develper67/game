@@ -85,8 +85,8 @@ export class ViewModel {
       this.item.rotation.y = Math.PI; // googly eyes look back at you
     } else if (kind === 'chicken') {
       this.item = chickenModel();
-      this.item.scale.setScalar(0.42);
-      this.item.rotation.y = Math.PI * 0.6;
+      this.item.scale.setScalar(0.26);
+      this.item.rotation.y = Math.PI * 0.65;
     }
     if (this.item) this.itemAnchor.add(this.item);
     this.switchT = 0.3;
@@ -161,7 +161,8 @@ export class ViewModel {
     } else if (this.state === 'potato' || this.state === 'chicken') {
       const wob = this.state === 'potato' ? Math.sin(this.t * 18) * 0.01 : 0;
       const pass = this.useT > 0 ? Math.sin((this.useT / 0.25) * Math.PI) * 0.25 : 0;
-      this.itemAnchor.position.set(0.12 + baseX, -0.27 + baseY + wob, -0.5 - pass);
+      const ix = this.state === 'chicken' ? 0.16 : 0.12;
+      this.itemAnchor.position.set(ix + baseX, -0.27 + baseY + wob, -0.5 - pass);
       this.itemAnchor.rotation.set(0.15, Math.sin(this.t * 1.5) * 0.12, 0);
       this.armR.position.set(0.24 + baseX, -0.25 + baseY, -0.48 - pass);
       this.armR.rotation.set(0.4, 0.35, -0.2);

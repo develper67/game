@@ -54,7 +54,7 @@ export class Economy {
     const crate = CRATES[crateId];
     if (!crate) return { error: 'Unknown crate.' };
     if (typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(requestId)) return { error: 'Invalid request id.' };
-    return db.tx(() => {
+    const res = db.tx(() => {
       const prev = db.get('SELECT result FROM transactions WHERE user_id = ? AND request_id = ?', [userId, requestId]);
       if (prev) return { ...JSON.parse(prev.result), replay: true };
       const u = db.get('SELECT coins FROM users WHERE id = ?', [userId]);
@@ -87,6 +87,14 @@ export class Economy {
       db.run('INSERT INTO transactions (user_id, request_id, kind, amount, result, created_at) VALUES (?, ?, ?, ?, ?, ?)', [userId, requestId, 'crate:' + crate.id, delta, JSON.stringify(result), now]);
       return result;
     });
+    if (res.ok && !res.replay) {
+      this.hub.emitTo(userId, 'user:update', { coins: res.coins });
+      if ((res.rarity === 'legendary' || res.rarity === 'epic') && !res.duplicate) {
+        const name = this.hub.usernameOf(userId);
+        setTimeout(() => this.services.chat?.lobbyAnnounce(`🎁 ${name} unboxed a ${RARITIES[res.rarity].name} skin: ${SKINS[res.skin].name}!`), 3500);
+      }
+    }
+    return res;
   }
 
   equip(userId, weapon, skinId) {

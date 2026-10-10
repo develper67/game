@@ -194,7 +194,7 @@ export class Game {
     this.gameChannel = 'game';
     const myParty = this.players.get(this.me)?.partyId;
     chanBtn.addEventListener('click', () => {
-      if (!this.app.party || !this.app.party.id) { this.gameChannel = 'game'; chanBtn.textContent = 'ALL'; toast('You are not in a party.'); return; }
+      if (!this.app.social.party) { this.gameChannel = 'game'; chanBtn.textContent = 'ALL'; toast('You are not in a party.'); return; }
       this.gameChannel = this.gameChannel === 'game' ? 'gameparty' : 'game';
       chanBtn.textContent = this.gameChannel === 'game' ? 'ALL' : 'PARTY';
       input.focus();

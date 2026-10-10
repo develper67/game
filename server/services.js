@@ -2,21 +2,20 @@
 import { Matchmaking } from './matchmaking.js';
 import { Profiles } from './profiles.js';
 import { Economy } from './economy.js';
+import { Friends } from './friends.js';
+import { Parties } from './party.js';
+import { Chat } from './chat.js';
 
 export function createServices({ io, hub }) {
   const services = {};
   services.profiles = new Profiles({ hub, services });
   services.economy = new Economy({ hub, services });
-  // Minimal party + chat until the social stage replaces them.
-  services.party = { get: () => null, allReady: () => true };
-  services.chat = {
-    matchAnnounce(match, text, kind = 'info') {
-      io.to(match.room).emit('chat:msg', { channel: 'game', system: true, kind, text, at: Date.now() });
-    },
-  };
+  services.friends = new Friends({ hub, services });
+  services.party = new Parties({ hub, services });
+  services.chat = new Chat({ io, hub, services });
   services.matchmaking = new Matchmaking({ io, hub, services });
 
-  const modules = [services.profiles, services.economy, services.matchmaking];
+  const modules = [services.profiles, services.economy, services.friends, services.party, services.chat, services.matchmaking];
 
   services.onConnect = (client) => {
     for (const m of modules) m.register?.(client);
@@ -27,6 +26,6 @@ export function createServices({ io, hub }) {
       try { m.onDisconnect?.(client, replaced); } catch (e) { console.error(e); }
     }
   };
-  services.shutdown = () => { services.matchmaking.shutdown(); };
+  services.shutdown = () => { services.matchmaking.shutdown(); services.party.shutdown(); };
   return services;
 }

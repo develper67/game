@@ -404,6 +404,7 @@ export class Match {
       }
     }
     this.state = 'disposed';
+    this.services.chat?.matchEnded?.(this.id);
     this.onFinished?.(this);
   }
 

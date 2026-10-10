@@ -97,6 +97,7 @@ export async function startServer(opts = {}) {
     db.run('UPDATE users SET last_seen = ? WHERE id = ?', [Date.now(), userId]);
     socket.emit('hello', { user: selfProfile(user), serverTime: Date.now() });
     services.onConnect(client);
+    hub.presenceChanged(userId);
 
     socket.on('time:ping', (t, ack) => { if (typeof ack === 'function') ack({ t, s: Date.now() }); });
 
@@ -105,6 +106,7 @@ export async function startServer(opts = {}) {
       hub.remove(client);
       db.run('UPDATE users SET last_seen = ? WHERE id = ?', [Date.now(), userId]);
       services.onDisconnect(client, false);
+      hub.presenceChanged(userId);
     });
   });
 
