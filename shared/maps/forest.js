@@ -138,6 +138,15 @@ export function build() {
   ];
   for (const [x, z, yaw] of spawns) { b.spawn(x, 0.1, z, yaw); R.addCentered(x, z, 2.5, 2.5); }
 
+  // Neighbourhood details: mailboxes by the front paths, hydrants on the kerb,
+  // planters and bins around the plaza
+  const put = (kind, x, z, rot = 0, s = 1, r = 0.6) => { if (R.free(x, z, r)) { b.prop(kind, x, 0, z, rot, s); R.addCentered(x, z, r * 2, r * 2); } };
+  for (const h of north) if (h.kind === 'house') put('mailbox', h.x - 1.6, 5.4, 0);
+  for (const h of south) if (h.kind === 'house') put('mailbox', h.x + 1.6, -5.4, Math.PI);
+  for (const x of [-45, -15, 15, 45]) { put('hydrant', x, 4.9); put('hydrant', x + 6, -4.9); }
+  for (const [x, z] of [[-9.6, -4], [9.6, 4]]) put('trashcan', x, z, 0, 1, 0.5);
+  for (const [x, z, r] of [[-4, -9.7, 0], [4, 9.7, 0], [-9.7, 4, Math.PI / 2], [9.7, -4, Math.PI / 2]]) put('planter', x, z, r, 1, 0.9);
+
   // Woods: dense pines around the edges, mixed trees closer to town
   const inTown = (x, z) => Math.abs(x) < 46 && z > -26 && z < 28;
   scatter(b, R, [-60, -60, 60, 60], 150, ['pine', 'pine', 'tree'], { r: 1.6, scale: [0.85, 1.4], avoid: (x, z) => !inTown(x, z) });

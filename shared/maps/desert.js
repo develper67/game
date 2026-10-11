@@ -120,6 +120,11 @@ export function build() {
   scatter(b, R, [-58, -58, 58, 58], 18, ['rock', 'bigrock'], { r: 2.5, scale: [0.7, 1.2] });
   scatter(b, R, [-58, -58, 58, 58], 10, ['barrel', 'hay', 'crate'], { r: 1.0 });
   scatter(b, R, [-58, -58, 58, 58], 25, ['grasstuft'], { r: 0.4, reserve: false, extra: () => ({}) });
+  // tumbleweeds, bleached skulls and a windmill water tower out on the flats
+  scatter(b, R, [-58, -58, 58, 58], 14, ['tumbleweed'], { r: 0.6, reserve: false });
+  scatter(b, R, [-58, -58, 58, 58], 6, ['cowskull'], { r: 0.6, reserve: false });
+  scatter(b, R, [-58, -58, 58, 58], 4, ['sandbags', 'tires', 'cablespool'], { r: 1.6 });
+  if (R.free(-54, 52, 2.4)) { b.prop('watertower', -54, 0, 52, 0, 0.9); R.addCentered(-54, 52, 4, 4); }
 
   return b.build(meta);
 }

@@ -90,6 +90,8 @@ export function build() {
   // Winter dressing
   scatter(b, R, [-56, -56, 56, 56], 120, ['snowpine', 'snowpine', 'pine'], { r: 1.6, scale: [0.85, 1.5] });
   scatter(b, R, [-56, -56, 56, 56], 14, ['snowman', 'log', 'rock'], { r: 1.3 });
+  scatter(b, R, [-56, -56, 56, 56], 16, ['snowpile'], { r: 1.0, reserve: false, scale: [0.8, 1.4] });
+  scatter(b, R, [-56, -56, 56, 56], 4, ['sandbags', 'cablespool'], { r: 1.6 });
   scatter(b, R, [-56, -56, 56, 56], 12, ['bush'], { r: 1.0, scale: [0.6, 1.0] });
 
   return b.build(meta);
