@@ -1,6 +1,6 @@
 // Small spinning 3D weapon preview for the Armory and crate reveals.
 import * as THREE from 'three';
-import { weaponModel } from '../game/models.js';
+import { weaponModel } from '../game/weapons.js';
 import { patternTexture } from '../game/textures.js';
 import { SKINS, THEMES } from '/shared/skins.js';
 
@@ -43,8 +43,9 @@ export class WeaponPreview {
       const now = performance.now();
       const dt = (now - last) / 1000; last = now;
       this.t += dt;
-      this.holder.rotation.y += dt * 0.8;
-      this.holder.rotation.x = Math.sin(this.t * 0.7) * 0.12;
+      // slow rock around a side-on view so the whole gun stays readable
+      this.holder.rotation.y = Math.sin(this.t * 0.55) * 0.75 - 0.25;
+      this.holder.rotation.x = Math.sin(this.t * 0.7) * 0.08 + 0.1;
       if (this.model && this.model.userData.mats && this.model.userData.mats.animated) {
         const m = this.model.userData.mats.base;
         if (m.map) m.map.offset.x = (this.t * 0.2) % 1;
@@ -62,7 +63,7 @@ export class WeaponPreview {
     const box = new THREE.Box3().setFromObject(this.model);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
-    const s = 1.5 / Math.max(size.x, size.y, size.z);
+    const s = 1.25 / Math.max(size.x, size.y, size.z);
     this.model.scale.setScalar(s);
     this.model.position.set(-center.x * s, -center.y * s, -center.z * s);
     this.model.rotation.y = 0;

@@ -1,38 +1,67 @@
 // First-person arms and held items, rendered in their own scene on top of the world.
 import * as THREE from 'three';
-import { weaponModel, potatoModel, chickenModel, itemModel, MUZZLE } from './models.js';
+import { potatoModel, chickenModel, itemModel } from './models.js';
+import { weaponModel, MUZZLE, MUZZLE_Y } from './weapons.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 const SKIN = 0xffcc99;
 const VM_SCALE = 0.62; // first-person weapon scale
+
+// Where the hands go on each gun (gun-local units, before VM_SCALE):
+// r = trigger hand on the grip, l = support hand, rot = arm rotations, sight = ADS sight height
+const HOLD = {
+  pistol: { r: [0, -0.04, 0.035], l: [-0.018, -0.07, 0.045], rr: [0.65, 0.32, 0], lr: [0.45, -0.35, 0.3], sight: 0.105 },
+  revolver: { r: [0, -0.035, 0.065], l: [-0.018, -0.065, 0.075], rr: [0.65, 0.32, 0], lr: [0.45, -0.35, 0.3], sight: 0.104 },
+  smg: { r: [0, -0.04, 0.025], l: [0, -0.05, -0.25], rr: [0.6, 0.3, 0], lr: [0.62, -0.4, 0.25], sight: 0.124 },
+  shotgun: { r: [0, -0.03, 0.08], l: [0, 0.03, -0.36], rr: [0.55, 0.3, 0], lr: [0.6, -0.42, 0.3], sight: 0.115 },
+  rifle: { r: [0, -0.04, 0.05], l: [0, 0.045, -0.34], rr: [0.6, 0.3, 0], lr: [0.6, -0.42, 0.3], sight: 0.16 },
+  sniper: { r: [0, -0.03, 0.06], l: [0, 0.02, -0.4], rr: [0.55, 0.3, 0], lr: [0.58, -0.45, 0.3], sight: 0.165 },
+  blaster: { r: [0, -0.04, 0.05], l: [0, 0.0, -0.22], rr: [0.6, 0.3, 0], lr: [0.62, -0.42, 0.25], sight: 0.14 },
+};
+
+// Rounded cartoon fist: palm, a row of curled fingers and a thumb (origin = fist centre, knuckles toward -Z)
+function handGeometry() {
+  const parts = [];
+  const add = (geo, x, y, z, rx = 0, ry = 0, rz = 0) => {
+    geo.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(1, 1, 1)));
+    parts.push(geo.index ? geo.toNonIndexed() : geo);
+  };
+  add(new RoundedBoxGeometry(0.072, 0.07, 0.08, 2, 0.02), 0, 0, 0.004);
+  for (let i = 0; i < 4; i++) add(new RoundedBoxGeometry(0.017, 0.026, 0.036, 2, 0.007), -0.026 + i * 0.0175, 0.006 - Math.abs(i - 1.5) * 0.002, -0.04, 0.25);
+  add(new RoundedBoxGeometry(0.024, 0.025, 0.058, 2, 0.01), -0.038, -0.012, -0.012, 0.15, 0.45, 0);
+  return mergeGeometries(parts, false);
+}
+let _handGeo = null, _sleeveGeo = null, _cuffGeo = null;
 
 export class ViewModel {
   constructor(sleeveColor) {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(58, 1, 0.01, 10);
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x666688, 1.6));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x6a6a90, 1.9));
+    const sun = new THREE.DirectionalLight(0xfff4e0, 1.7);
     sun.position.set(0.5, 1, 0.3);
-    this.scene.add(sun);
+    const rim = new THREE.DirectionalLight(0xbfd8ff, 0.9); // edge light so dark guns keep their shape
+    rim.position.set(-1, 0.4, -1);
+    this.scene.add(sun, rim);
     this.root = new THREE.Group();
     this.scene.add(this.root);
 
-    const sleeve = new THREE.MeshLambertMaterial({ color: sleeveColor || '#4cc9f0' });
-    const skin = new THREE.MeshLambertMaterial({ color: SKIN });
+    const sleeve = new THREE.MeshPhongMaterial({ color: sleeveColor || '#4cc9f0', shininess: 12, specular: 0x222222 });
+    const skin = new THREE.MeshPhongMaterial({ color: SKIN, shininess: 18, specular: 0x332211 });
+    const cuffMat = new THREE.MeshPhongMaterial({ color: 0xf4f1ea, shininess: 10 });
     this.sleeveMat = sleeve;
+    if (!_handGeo) {
+      _handGeo = handGeometry();
+      // sleeve: slightly tapered tube running back along +Z, with a rolled cuff at the wrist
+      _sleeveGeo = new THREE.CylinderGeometry(0.047, 0.056, 0.44, 12).rotateX(Math.PI / 2).translate(0, -0.004, 0.29);
+      _cuffGeo = new THREE.TorusGeometry(0.05, 0.014, 6, 14).translate(0, -0.004, 0.075);
+    }
     // An arm is a group whose origin is the fist; the forearm/sleeve runs back
     // along +Z and is tilted (via the group's rotation) down out of the screen.
     const mkArm = () => {
       const g = new THREE.Group();
-      const hand = new THREE.Mesh(new THREE.BoxGeometry(0.066, 0.066, 0.08), skin);
-      const knuckles = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.026, 0.026), new THREE.MeshLambertMaterial({ color: 0xf0b98a }));
-      knuckles.position.set(0, 0.018, -0.04);
-      const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.022, 0.05), skin);
-      thumb.position.set(-0.03, -0.012, -0.02);
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.085, 0.42), sleeve);
-      arm.position.set(0, 0, 0.27);
-      const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.092, 0.092, 0.04), new THREE.MeshLambertMaterial({ color: 0xffffff }));
-      cuff.position.set(0, 0, 0.065);
-      g.add(hand, knuckles, thumb, arm, cuff);
+      g.add(new THREE.Mesh(_handGeo, skin), new THREE.Mesh(_sleeveGeo, sleeve), new THREE.Mesh(_cuffGeo, cuffMat));
       return g;
     };
     this.armR = mkArm();
@@ -75,10 +104,14 @@ export class ViewModel {
     if (kind === this.state && weaponType === this.weaponType && skin === this.skin) return;
     if (this.item) { this.itemAnchor.remove(this.item); this.item = null; }
     this.state = kind; this.weaponType = weaponType; this.skin = skin;
+    // with a gun the hands ride on the gun (so they follow recoil and reloads); otherwise on the root
+    const parent = kind === 'weapon' && weaponType ? this.itemAnchor : this.root;
+    if (this.armR.parent !== parent) { parent.add(this.armR, this.armL); }
+    this.armL.scale.x = -1; // left hand = mirrored right hand
     if (kind === 'weapon' && weaponType) {
       this.item = weaponModel(weaponType, skin);
       this.item.scale.setScalar(VM_SCALE);
-      this.flash.position.set(0, 0.07 * VM_SCALE, (MUZZLE[weaponType] || -0.4) * VM_SCALE);
+      this.flash.position.set(0, (MUZZLE_Y[weaponType] || 0.07) * VM_SCALE, (MUZZLE[weaponType] || -0.4) * VM_SCALE);
     } else if (kind === 'potato') {
       this.item = potatoModel();
       this.item.scale.setScalar(0.3);
@@ -141,22 +174,28 @@ export class ViewModel {
     this.root.position.set(0, 0, 0);
 
     if (this.state === 'weapon') {
+      const hold = HOLD[this.weaponType] || HOLD.pistol;
       const rl = this.reloadT > 0 ? Math.sin((1 - this.reloadT / this.reloadDur) * Math.PI) : 0;
-      const hipX = 0.15, hipY = -0.15, hipZ = -0.34;
-      const adsX = 0, adsY = -0.078, adsZ = -0.26;
-      const px = hipX + (adsX - hipX) * this.ads + baseX;
-      const py = hipY + (adsY - hipY) * this.ads + baseY - rl * 0.12 + (sprint && moving ? -0.05 : 0);
-      const pz = hipZ + (adsZ - hipZ) * this.ads + this.recoil * 0.6;
+      const run = sprint && moving ? 1 : 0;
+      const small = this.weaponType === 'pistol' || this.weaponType === 'revolver';
+      const hipX = small ? 0.12 : 0.14, hipY = small ? -0.105 : -0.13, hipZ = small ? -0.27 : -0.3;
+      // aim down sights: the sight line sits on the screen centre
+      const adsX = 0, adsY = -hold.sight * VM_SCALE, adsZ = this.weaponType === 'sniper' ? -0.2 : -0.24;
+      const k = this.ads;
+      const px = hipX + (adsX - hipX) * k + baseX * (1 - k * 0.7);
+      const py = hipY + (adsY - hipY) * k + baseY * (1 - k * 0.7) - rl * 0.1 - run * 0.04;
+      const pz = hipZ + (adsZ - hipZ) * k + this.recoil * 0.55;
       this.itemAnchor.position.set(px, py, pz);
-      this.itemAnchor.rotation.set(this.recoil * 1.6 + rl * 0.6, (sprint && moving ? 0.5 : 0) * (1 - this.ads), rl * 0.5 + (sprint && moving ? 0.3 : 0));
-      // right hand on the grip
-      this.armR.position.set(px + 0.0, py - 0.045, pz + 0.03);
-      this.armR.rotation.set(0.75, 0.3, 0);
-      // left hand on the front of the gun
-      const long = ['rifle', 'shotgun', 'sniper', 'smg', 'blaster'].includes(this.weaponType);
-      const lz = long ? -0.15 : -0.01;
-      this.armL.position.set(px - 0.02 + (rl * -0.1), py - 0.03 - rl * 0.1, pz + lz + rl * 0.15);
-      this.armL.rotation.set(0.55, -0.7, 0);
+      this.itemAnchor.rotation.set(
+        this.recoil * 1.5 + rl * 0.55 - run * 0.15,
+        (run * 0.55 + (1 - k) * 0.035) * (1 - k),
+        rl * 0.55 + run * 0.35);
+      const S = VM_SCALE;
+      this.armR.position.set(hold.r[0] * S, hold.r[1] * S, hold.r[2] * S);
+      this.armR.rotation.set(hold.rr[0], hold.rr[1], hold.rr[2]);
+      // support hand slides down to the magazine while reloading
+      this.armL.position.set(hold.l[0] * S - rl * 0.03, hold.l[1] * S - rl * 0.07, hold.l[2] * S + rl * 0.12);
+      this.armL.rotation.set(hold.lr[0] + rl * 0.4, hold.lr[1], hold.lr[2]);
       this.armL.visible = true;
     } else if (this.state === 'potato' || this.state === 'chicken') {
       const wob = this.state === 'potato' ? Math.sin(this.t * 18) * 0.01 : 0;
