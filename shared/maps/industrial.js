@@ -32,7 +32,7 @@ export function build() {
   for (let x = -58; x < 58; x += 5) overlay(b, x, -0.12, x + 2.5, 0.12, 'paint', 0xffd23f, 0.03);
 
   // ------------------------------------------------ central raised platform with ramps + stairs
-  b.box(-8, 0, -8, 8, PLAT, 8, 'metalfloor', 0x6b6f75);
+  b.box(-8, 0, -8, 8, PLAT, 8, 'metalfloor', 0x9097a0);
   overlay(b, -7.8, -7.8, 7.8, 7.8, 'paint', 0xffd23f, PLAT + 0.01);
   b.box(-7.6, PLAT + 0.01, -7.6, 7.6, PLAT + 0.02, 7.6, 'metalfloor', 0x787d84, { col: false });
   // railing with gaps for the ramps/stairs
@@ -47,7 +47,7 @@ export function build() {
   winningTable(b, 0, PLAT, 0);
   // catwalk from the platform west to the tank deck
   bridgeX(F, -22, -8, 0, PLAT, 2.4, 0x6b6f75);
-  b.box(-30, 0, -6, -22, PLAT, 6, 'metalfloor', 0x6b6f75);
+  b.box(-30, 0, -6, -22, PLAT, 6, 'metalfloor', 0x9097a0);
   b.box(-30, PLAT, -6, -22, PLAT + 1.0, -5.9, 'metal', 0xf4a300); b.box(-30, PLAT, 5.9, -22, PLAT + 1.0, 6, 'metal', 0xf4a300);
   b.box(-30, PLAT, -6, -29.9, PLAT + 1.0, 6, 'metal', 0xf4a300);
   b.prop('tank', -27, PLAT, -2.5, 0, 0.8); b.prop('tank', -27, PLAT, 2.5, 0, 0.8);
@@ -134,6 +134,27 @@ export function build() {
   ];
   for (const [x, z, yaw] of spawns) { b.spawn(x, 0.1, z, yaw); R.addCentered(x, z, 2.5, 2.5); }
 
+  // ------------------------------------------------ yard life
+  // twin striped smokestacks behind the factory: the landmark you see from everywhere
+  for (const [x, z] of [[53, -52], [57, -44]]) {
+    for (let i = 0; i < 7; i++) b.cylinder(x, i * 2.8, z, 1.5 - i * 0.07, 2.8, 'paint', i % 2 ? 0xf1f3f5 : 0xd9480f, { seg: 14, col: i === 0 });
+    b.cylinder(x, 19.6, z, 1.15, 0.5, 'metal', 0x343a40, { seg: 14, col: false });
+    R.addCentered(x, z, 3.6, 3.6);
+  }
+  // black & yellow hazard stripes around the foot of the central platform
+  for (let t = -9; t < 9; t += 1) {
+    const c = (t + 9) % 2 ? 0x212529 : 0xffd43b;
+    overlay(b, t, -9, t + 1, -8, 'paint', c, 0.03); overlay(b, t, 8, t + 1, 9, 'paint', c, 0.03);
+    overlay(b, -9, t, -8, t + 1, 'paint', c, 0.03); overlay(b, 8, t, 9, t + 1, 'paint', c, 0.03);
+  }
+  // overhead pipe bridge from the silos to the factory hall (decor, high above heads)
+  for (const z of [27.4, 28.2]) b.box(13, 7.2, z - 0.3, 52, 7.8, z + 0.3, 'metal', z > 28 ? 0x4dabf7 : 0xadb5bd, { col: false });
+  for (const x of [26, 38, 50]) { b.box(x - 0.2, 0, 27.3, x + 0.2, 7.2, 27.7, 'metal', 0x495057); R.addCentered(x, 27.5, 1, 1); }
+  // forklifts, trucks at the loading doors, spools and pipes
+  for (const [x, z, r] of [[-26, 30, 1], [24, 28, 0], [-24, -30, 1], [18, -20, 0]]) if (R.free(x, z, 1.5)) { b.prop('forklift', x, 0, z, r * Math.PI / 2, 1); R.addCentered(x, z, 2.6, 2.8); }
+  for (const [x, z, r] of [[-36, 52, 0], [32, 54, 0]]) if (R.free(x, z, 2)) { b.prop('truck', x, 0, z, r, 1, { color: rng.pick([0xe03131, 0x1c7ed6, 0x2f9e44]) }); R.addCentered(x, z, 3, 8); }
+  for (let x = -50; x <= 50; x += 20) for (const z of [-6.5, 6.5]) if (R.free(x, z, 0.8)) { b.prop('lamp', x, 0, z, 0, 1); R.addCentered(x, z, 1, 1); }
+  scatter(b, R, [-58, -58, 58, 58], 10, ['cablespool', 'pipe', 'tires', 'sandbags'], { r: 1.6 });
   scatter(b, R, [-58, -58, 58, 58], 30, ['barrel', 'pallet', 'crate', 'cone', 'cone'], { r: 1.0 });
   scatter(b, R, [-58, -58, 58, 58], 6, ['car'], { r: 3, extra: (r) => ({ color: r.pick([0x546e7a, 0xf4a300, 0xffffff, 0x2e86de]) }) });
   return b.build(meta);
