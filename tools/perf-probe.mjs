@@ -4,7 +4,7 @@ import { startServer } from '../server/index.js';
 import { MAP_IDS } from '../shared/maps/index.js';
 
 const quality = process.argv[2] || 'low';
-const srv = await startServer({ port: 0, dbFile: ':memory:', quiet: true, noSignals: true, matchConfig: { voteSeconds: 1, countdownSeconds: 1 } });
+const srv = await startServer({ port: 0, dbFile: ':memory:', quiet: true, noSignals: true, matchConfig: { voteSeconds: 4, countdownSeconds: 1 } });
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 await page.addInitScript((q) => { window.__YOINK_TEST__ = true; localStorage.setItem('yoink_settings_v1', JSON.stringify({ quality: q })); }, quality);
