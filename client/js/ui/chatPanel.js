@@ -1,7 +1,13 @@
 // Chat widget with channel tabs (lobby / party / match).
 import { h, clear } from '../util/dom.js';
+import { uiIcon } from './art.js';
 
 const NAMES = { lobby: 'Lobby', party: 'Party', game: 'Match', gameparty: 'Party' };
+const EMPTY = {
+  lobby: ['No messages yet', 'Say hi to everyone in the lobby!'],
+  party: ['Party chat is quiet', 'Only your party can read messages here.'],
+  game: ['No messages yet', 'Wish everyone good luck!'],
+};
 
 export class ChatPanel {
   constructor(app, channels = ['lobby', 'party']) {
@@ -11,9 +17,11 @@ export class ChatPanel {
     this.tabs = h('div', { class: 'chat-tabs' });
     this.log = h('div', { class: 'chat-log' });
     this.note = h('div', { class: 'chat-note' });
-    this.input = h('input', { class: 'input', maxlength: '200', placeholder: 'Type a message…', id: 'chat-input' });
+    this.input = h('input', { class: 'input', maxlength: '200', placeholder: 'Type a message…', id: 'chat-input', autocomplete: 'off' });
     this.form = h('form', { class: 'chat-form', onSubmit: (e) => { e.preventDefault(); this.send(); } }, this.input, h('button', { class: 'btn cyan small', type: 'submit', text: 'Send', id: 'chat-send' }));
-    this.el = h('div', { class: 'chat' }, this.tabs, this.log, this.note, this.form);
+    this.el = h('div', { class: 'chat' },
+      h('div', { class: 'chat-head' }, h('span', { class: 'chat-title', text: 'Chat' }), this.tabs),
+      this.log, this.note, this.form);
     this.unread = {};
     this.unsub = app.chat.on((ch, m) => {
       if (ch === null) { this.renderLog(); return; }
@@ -51,15 +59,24 @@ export class ChatPanel {
     else if (this.active === 'game') note = 'Everyone in this match can see these messages.';
     this.note.textContent = note;
     this.input.disabled = this.active === 'party' && !inParty;
+    this.input.placeholder = this.input.disabled ? 'Party chat is off — no party' : `Message ${NAMES[this.active] || ''}…`;
   }
 
   renderLog() {
     clear(this.log);
-    for (const m of this.app.chat.history(this.active)) this.log.appendChild(this.app.chat.renderLine(m));
+    const list = this.app.chat.history(this.active);
+    if (!list.length) this.log.appendChild(this.emptyState());
+    for (const m of list) this.log.appendChild(this.app.chat.renderLine(m));
     this.log.scrollTop = this.log.scrollHeight;
   }
 
+  emptyState() {
+    const [title, sub] = EMPTY[this.active] || EMPTY.lobby;
+    return h('div', { class: 'chat-empty' }, uiIcon('chat', 'ce-art'), h('b', { text: title }), h('span', { text: sub }));
+  }
+
   appendLine(m) {
+    this.log.querySelector('.chat-empty')?.remove();
     const atBottom = this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight < 40;
     this.log.appendChild(this.app.chat.renderLine(m));
     while (this.log.children.length > 150) this.log.firstChild.remove();

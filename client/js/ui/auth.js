@@ -1,6 +1,9 @@
 import { h } from '../util/dom.js';
 import { api } from '../api.js';
-import { MODES } from '/shared/constants.js';
+import { MODES, MODE_IDS } from '/shared/constants.js';
+import { modeArt, logo } from './art.js';
+
+const TILT = ['-6deg', '4deg', '-3deg', '6deg', '-4deg'];
 
 export class AuthScreen {
   constructor(app, message) {
@@ -13,7 +16,9 @@ export class AuthScreen {
     const err = h('div', { class: 'err', id: 'auth-err', text: message || '' });
     const submit = h('button', { class: 'btn big', type: 'submit', id: 'auth-submit', style: { width: '100%' }, text: 'LOG IN' });
     const confirmField = h('div', { class: 'field hidden' }, h('label', { for: 'auth-pass2', text: 'Confirm password' }), pass2);
-    const hint = h('div', { class: 'hint hidden', text: '3–16 letters, numbers or _. Password at least 6 characters.' });
+    const hint = h('div', { class: 'hint hidden', style: { marginBottom: '12px' }, text: '3–16 letters, numbers or _. Password at least 6 characters.' });
+    const headTitle = h('h2', { text: 'Welcome back!' });
+    const headSub = h('p', { text: 'Log in to jump back into the chaos.' });
     const tabLogin = h('button', { class: 'tab active', type: 'button', text: 'Log in' });
     const tabReg = h('button', { class: 'tab', type: 'button', text: 'Create account' });
     const setMode = (m) => {
@@ -23,6 +28,9 @@ export class AuthScreen {
       confirmField.classList.toggle('hidden', m === 'login');
       hint.classList.toggle('hidden', m === 'login');
       submit.textContent = m === 'login' ? 'LOG IN' : 'CREATE ACCOUNT';
+      submit.classList.toggle('green', m === 'register');
+      headTitle.textContent = m === 'login' ? 'Welcome back!' : 'Join the party!';
+      headSub.textContent = m === 'login' ? 'Log in to jump back into the chaos.' : 'Pick a name — your friends will find you by it.';
       pass.autocomplete = m === 'login' ? 'current-password' : 'new-password';
       err.textContent = '';
       user.classList.remove('error'); pass.classList.remove('error'); pass2.classList.remove('error');
@@ -59,13 +67,16 @@ export class AuthScreen {
     err, submit);
     this.el = h('div', { class: 'auth-wrap' },
       h('div', { class: 'auth-hero' },
-        h('div', { class: 'logo' }, 'yoink', h('span', { class: 'bang', text: '!' })),
-        h('p', { text: 'The first-person party game where you tag, pass, grab, scavenge and shoot your way to glory with your friends.' }),
-        h('div', { class: 'mode-chips' }, Object.values(MODES).map((m) => h('span', { class: 'chip', text: `${m.icon} ${m.name}` })))),
+        logo(),
+        h('p', { class: 'auth-tag' }, 'The first-person party game where you ', h('b', { text: 'tag, pass, grab, scavenge and shoot' }), ' your way to glory with your friends.'),
+        h('div', { class: 'auth-modes' }, MODE_IDS.map((id, i) => h('div', { class: 'auth-mode', style: { '--mc': MODES[id].color, '--i': String(i), '--r': TILT[i % TILT.length] } },
+          h('div', { class: 'tile' }, modeArt(id)),
+          h('span', { text: MODES[id].short || MODES[id].name }))))),
       h('div', { class: 'card auth-card' },
+        h('div', { class: 'auth-head' }, headTitle, headSub),
         h('div', { class: 'tabs' }, tabLogin, tabReg),
         form,
-        h('p', { class: 'hint', style: { marginTop: '14px', textAlign: 'center' }, text: 'An account is required to play — even practice mode. Progress is saved on the server.' })));
+        h('p', { class: 'hint auth-foot', text: 'An account is required to play — even practice mode. Progress is saved on the server.' })));
     this.user = user;
   }
   mounted() { this.user.focus(); }
