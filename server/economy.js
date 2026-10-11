@@ -21,7 +21,8 @@ export class Economy {
       if (typeof ack === 'function') ack(r);
     });
     s.on('skin:equip', (d, ack) => {
-      const r = this.equip(client.userId, d && d.weapon, d && d.skin);
+      let r;
+      try { r = this.equip(client.userId, d && d.weapon, d && d.skin); } catch (e) { console.error(e); r = { error: 'Server error.' }; }
       if (typeof ack === 'function') ack(r);
     });
   }
@@ -51,6 +52,7 @@ export class Economy {
   }
 
   openCrate(userId, crateId, requestId) {
+    if (typeof crateId !== 'string' || !Object.hasOwn(CRATES, crateId)) return { error: 'Unknown crate.' };
     const crate = CRATES[crateId];
     if (!crate) return { error: 'Unknown crate.' };
     if (typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(requestId)) return { error: 'Invalid request id.' };
@@ -88,6 +90,7 @@ export class Economy {
       return result;
     });
     if (res.ok && !res.replay) {
+      db.flush(); // a paid roll is on disk before the result is shown
       this.hub.emitTo(userId, 'user:update', { coins: res.coins });
       if ((res.rarity === 'legendary' || res.rarity === 'epic') && !res.duplicate) {
         const name = this.hub.usernameOf(userId);
@@ -98,11 +101,12 @@ export class Economy {
   }
 
   equip(userId, weapon, skinId) {
-    if (!WEAPON_IDS.includes(weapon)) return { error: 'Unknown weapon.' };
+    if (typeof weapon !== 'string' || !WEAPON_IDS.includes(weapon)) return { error: 'Unknown weapon.' };
     if (skinId === null || skinId === '' || skinId === undefined) {
       db.run('DELETE FROM skins_equipped WHERE user_id = ? AND weapon = ?', [userId, weapon]);
       return { ok: true, equipped: this.equippedSkins(userId) };
     }
+    if (typeof skinId !== 'string' || !Object.hasOwn(SKINS, skinId)) return { error: 'That skin does not fit this weapon.' };
     const skin = SKINS[skinId];
     if (!skin || skin.weapon !== weapon) return { error: 'That skin does not fit this weapon.' };
     if (!db.get('SELECT 1 FROM skins_owned WHERE user_id = ? AND skin_id = ?', [userId, skinId])) return { error: 'You do not own that skin.' };

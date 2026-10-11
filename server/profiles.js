@@ -12,12 +12,16 @@ export class Profiles {
     const s = client.socket;
     s.on('profile:get', (d, ack) => {
       if (typeof ack !== 'function') return;
-      const target = d && d.username ? db.get('SELECT id FROM users WHERE username = ? COLLATE NOCASE', [String(d.username).slice(0, 32)]) : { id: client.userId };
-      if (!target) return ack({ error: 'Player not found.' });
-      ack({ profile: this.publicProfile(target.id, client.userId) });
+      try {
+        const name = d && typeof d.username === 'string' ? d.username.trim().slice(0, 32) : '';
+        const target = name ? db.get('SELECT id FROM users WHERE username = ? COLLATE NOCASE', [name]) : { id: client.userId };
+        if (!target) return ack({ error: 'Player not found.' });
+        ack({ profile: this.publicProfile(target.id, client.userId) });
+      } catch (e) { console.error(e); ack({ error: 'Server error.' }); }
     });
     s.on('profile:avatar', (d, ack) => {
-      const r = this.setAvatar(client.userId, d || {});
+      let r;
+      try { r = this.setAvatar(client.userId, d && typeof d === 'object' ? d : {}); } catch (e) { console.error(e); r = { error: 'Server error.' }; }
       if (typeof ack === 'function') ack(r);
     });
   }
@@ -28,9 +32,8 @@ export class Profiles {
   }
 
   setAvatar(userId, d) {
-    const color = String(d.color || '');
-    const hat = String(d.hat || '');
-    const face = String(d.face || '');
+    const str = (v) => (typeof v === 'string' ? v : '');
+    const color = str(d.color), hat = str(d.hat), face = str(d.face);
     if (!AVATAR_COLORS.includes(color)) return { error: 'Invalid color.' };
     if (!AVATAR_HATS.includes(hat)) return { error: 'Invalid hat.' };
     if (!AVATAR_FACES.includes(face)) return { error: 'Invalid face.' };

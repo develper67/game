@@ -3,6 +3,10 @@
 import crypto from 'node:crypto';
 import { PARTY, MODE_IDS } from '../shared/constants.js';
 
+// client payload fields: only plain strings/numbers are accepted
+const idOf = (v) => (typeof v === 'number' || typeof v === 'string' ? +v : NaN);
+const str = (v) => (typeof v === 'string' ? v : '');
+
 export class Parties {
   constructor({ hub, services }) {
     this.hub = hub;
@@ -32,14 +36,20 @@ export class Parties {
       if (typeof ack === 'function') ack(r);
     });
     handle('party:create', () => this.create(client));
-    handle('party:invite', (d) => this.invite(client, +d.userId));
-    handle('party:respond', (d) => this.respond(client, String(d.inviteId || ''), !!d.accept));
+    handle('party:invite', (d) => this.invite(client, idOf(d.userId)));
+    handle('party:respond', (d) => this.respond(client, str(d.inviteId), !!d.accept));
     handle('party:leave', () => this.leave(client.userId, 'left'));
-    handle('party:kick', (d) => this.kick(client, +d.userId));
-    handle('party:promote', (d) => this.promote(client, +d.userId));
+    handle('party:kick', (d) => this.kick(client, idOf(d.userId)));
+    handle('party:promote', (d) => this.promote(client, idOf(d.userId)));
     handle('party:ready', (d) => this.setReady(client, !!d.ready));
     handle('party:mode', (d) => this.setMode(client, d.mode));
     handle('party:start', (d) => this.start(client, d));
+  }
+
+  // When a member joined their current party (party chat history starts there).
+  memberSince(userId) {
+    const p = this.partyOf(userId);
+    return (p && p.since.get(userId)) || 0;
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -80,7 +90,7 @@ export class Parties {
   create(client) {
     if (this.partyOf(client.userId)) return { error: 'You are already in a party.' };
     if (!this.services.friends.friendIds(client.userId).length) return { error: 'You need at least one accepted friend to create a party.' };
-    const p = { id: 'p' + crypto.randomBytes(5).toString('hex'), leader: client.userId, members: [client.userId], ready: new Set(), mode: 'tag', createdAt: Date.now() };
+    const p = { id: 'p' + crypto.randomBytes(5).toString('hex'), leader: client.userId, members: [client.userId], ready: new Set(), mode: 'tag', createdAt: Date.now(), since: new Map([[client.userId, Date.now()]]) };
     this.parties.set(p.id, p);
     client.partyId = p.id;
     this.push(p);
@@ -123,11 +133,14 @@ export class Parties {
   respond(client, inviteId, accept) {
     const inv = this.invites.get(inviteId);
     if (!inv || inv.to !== client.userId) return { error: 'That invitation is no longer valid.' };
-    this.invites.delete(inviteId);
     const p = this.parties.get(inv.partyId);
+    // still in a match: keep the invite pending so it can be accepted afterwards
+    if (accept && p && client.matchId && Date.now() <= inv.expiresAt) return { error: 'Finish your current match first, then accept.' };
+    this.invites.delete(inviteId);
     const fromName = this.hub.usernameOf(inv.from);
     if (Date.now() > inv.expiresAt) {
       this.hub.emitTo(inv.from, 'party:inviteResult', { to: client.username, result: 'expired' });
+      if (p) this.push(p);
       return { error: 'That invitation has expired.' };
     }
     if (!accept) {
@@ -136,9 +149,9 @@ export class Parties {
       return { ok: true };
     }
     if (!p) return { error: 'That party no longer exists.' };
-    if (client.matchId) return { error: 'Finish your current match first.' };
     if (p.members.length >= PARTY.MAX_SIZE) {
       this.hub.emitTo(inv.from, 'party:inviteResult', { to: client.username, result: 'full' });
+      this.push(p);
       return { error: 'That party is already full.' };
     }
     if (p.members.includes(client.userId)) return { ok: true };
@@ -146,6 +159,7 @@ export class Parties {
     if (current) this.leave(client.userId, 'switched');
     if (client.queue) this.services.matchmaking.leaveQueue(client, true);
     p.members.push(client.userId);
+    p.since.set(client.userId, Date.now());
     client.partyId = p.id;
     // cancel any queue the party was in: the group changed
     for (const id of p.members) { const c = this.hub.get(id); if (c && c.queue) this.services.matchmaking.leaveQueue(c, true); }
@@ -162,6 +176,7 @@ export class Parties {
     if (!p) return { error: 'You are not in a party.' };
     p.members = p.members.filter((id) => id !== userId);
     p.ready.delete(userId);
+    p.since.delete(userId);
     const c = this.hub.get(userId);
     if (c) {
       c.partyId = null;
@@ -171,10 +186,13 @@ export class Parties {
       this.hub.presenceChanged(userId);
     }
     // drop invites this user sent for this party
-    for (const [id, inv] of this.invites) if (inv.partyId === p.id && inv.from === userId) this.invites.delete(id);
+    for (const [id, inv] of this.invites) {
+      if (inv.partyId === p.id && inv.from === userId) { this.invites.delete(id); this.hub.emitTo(inv.to, 'party:inviteRevoked', { id }); }
+    }
     const name = this.hub.usernameOf(userId);
     if (!p.members.length) {
       this.parties.delete(p.id);
+      this.services.chat?.partyEnded?.(p.id);
       for (const [id, inv] of this.invites) if (inv.partyId === p.id) { this.invites.delete(id); this.hub.emitTo(inv.to, 'party:inviteRevoked', { id }); }
       return { ok: true };
     }

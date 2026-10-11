@@ -18,6 +18,7 @@ export class TagMode {
   }
 
   setIt(p, from) {
+    if (p) p.wasIt = true;
     const now = Date.now();
     if (this.it) this.it.speedMul = 1;
     this.it = p;
@@ -88,7 +89,7 @@ export class TagMode {
   rewards(p) {
     const out = [];
     if (p.stats.tags) out.push({ label: `Tags x${p.stats.tags}`, coins: Math.min(40, p.stats.tags * 8) });
-    if (p.stats.itTime < 0.5) out.push({ label: 'Untouchable (never IT)', coins: 25 });
+    if (!p.wasIt) out.push({ label: 'Untouchable (never IT)', coins: 25 });
     return out;
   }
 }

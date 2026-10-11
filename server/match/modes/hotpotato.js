@@ -1,6 +1,8 @@
 // HOT POTATO: one player holds the ridiculous Boob-tato. Pass it with E
 // (or a punch) to a nearby player. When it pops, the holder loses a life.
 // Out of lives = eliminated. Last player standing wins.
+import { lineOfSight } from '../../../shared/physics.js';
+
 const LIVES = 2;
 
 export class HotPotatoMode {
@@ -53,7 +55,7 @@ export class HotPotatoMode {
 
   tryPass(a, t) {
     const now = Date.now();
-    if (a !== this.holder || !t || !t.alive || t === a) return false;
+    if (a !== this.holder || !t || !t.alive || t.left || t === a) return false;
     if (now < a.cd.tag) return false;
     if (t === this.lastGiver && now < this.noPassBackUntil) {
       this.m.emitTo(a, 'ev', { k: 'toast', text: 'No pass-backs yet!' });
@@ -66,9 +68,12 @@ export class HotPotatoMode {
 
   onUse(p, d) {
     if (d.k !== 'player') return false;
+    if (typeof d.id !== 'number') return true;
     const t = this.m.byNum[d.id | 0];
-    if (!t || !t.alive || t === p) return true;
+    if (!t || !t.alive || t.left || t === p) return true;
     if (Math.hypot(t.x - p.x, t.z - p.z) > 3.0 || Math.abs(t.y - p.y) > 2) return true;
+    const e = this.m.eye(p);
+    if (!lineOfSight(this.m.world, e.x, e.y, e.z, t.x, t.y + 1.1, t.z)) return true; // no passing through walls
     this.tryPass(p, t);
     return true;
   }

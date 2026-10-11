@@ -32,6 +32,7 @@ export class Net {
           this.emitLocal('net:error', err);
         }
       });
+      s.on('png', (ack) => { if (typeof ack === 'function') ack(); }); // server-side latency probe
       s.onAny((ev, ...args) => this.emitLocal(ev, ...args));
       this.clockTimer = setInterval(() => this.syncClock(), 4000);
     });

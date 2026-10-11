@@ -98,10 +98,26 @@ function rateLimited(key, max, windowMs) {
   buckets.set(key, arr);
   return false;
 }
+// same window check without counting this request (count later with hit())
+function wouldLimit(key, max, windowMs) {
+  const now = Date.now();
+  return (buckets.get(key) || []).filter((t) => now - t < windowMs).length >= max;
+}
+function hit(key) {
+  const arr = buckets.get(key) || [];
+  arr.push(Date.now());
+  buckets.set(key, arr);
+}
 setInterval(() => {
   const now = Date.now();
   for (const [k, arr] of buckets) if (!arr.length || now - arr[arr.length - 1] > 3600_000) buckets.delete(k);
+  purgeExpiredSessions();
 }, 600_000).unref();
+
+// Sessions whose token was never presented again (closed tabs) would otherwise stay forever.
+export function purgeExpiredSessions() {
+  try { db.run('DELETE FROM sessions WHERE expires_at < ?', [Date.now()]); } catch (e) { console.error('session purge failed', e); }
+}
 
 function bearer(req) {
   const h = req.headers.authorization || '';
@@ -112,7 +128,8 @@ export function mountAuthRoutes(app, hooks = {}) {
   app.post('/api/register', async (req, res) => {
     try {
       const ip = req.ip || 'x';
-      if (rateLimited('reg:' + ip, 20, 3600_000)) return res.status(429).json({ error: 'Too many accounts created from this address. Try again later.' });
+      // attempts are limited loosely (typos and taken names are normal); created accounts strictly
+      if (rateLimited('regtry:' + ip, 120, 3600_000) || wouldLimit('reg:' + ip, 20, 3600_000)) return res.status(429).json({ error: 'Too many accounts created from this address. Try again later.' });
       const { username, password } = req.body || {};
       const uErr = validateUsername(username);
       if (uErr) return res.status(400).json({ error: uErr, field: 'username' });
@@ -130,6 +147,7 @@ export function mountAuthRoutes(app, hooks = {}) {
       const color = AVATAR_COLORS[Math.floor(Math.random() * 7)];
       const now = Date.now();
       const { lastId } = db.run('INSERT INTO users (username, pass_hash, created_at, last_seen, avatar_color) VALUES (?, ?, ?, ?, ?)', [name, hash, now, now, color]);
+      hit('reg:' + ip);
       const token = createSession(lastId);
       const user = db.get('SELECT * FROM users WHERE id = ?', [lastId]);
       hooks.onRegister?.(user);
@@ -146,10 +164,12 @@ export function mountAuthRoutes(app, hooks = {}) {
       const { username, password } = req.body || {};
       if (typeof username !== 'string' || !username.trim()) return res.status(400).json({ error: 'Enter your username.', field: 'username' });
       if (typeof password !== 'string' || !password) return res.status(400).json({ error: 'Enter your password.', field: 'password' });
-      if (rateLimited('login:' + ip, 30, 300_000) || rateLimited('loginu:' + username.toLowerCase(), 10, 300_000)) {
+      const name = username.trim();
+      // the per-account bucket uses the same normalized name as the lookup
+      if (rateLimited('login:' + ip, 30, 300_000) || rateLimited('loginu:' + name.toLowerCase(), 10, 300_000)) {
         return res.status(429).json({ error: 'Too many login attempts. Wait a few minutes and try again.' });
       }
-      const user = db.get('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [username.trim()]);
+      const user = db.get('SELECT * FROM users WHERE username = ? COLLATE NOCASE', [name]);
       // Always run a hash to keep timing similar for unknown users
       const ok = user ? await verifyPassword(password, user.pass_hash) : (await hashPassword(password), false);
       if (!ok) return res.status(401).json({ error: 'Wrong username or password.' });

@@ -60,7 +60,7 @@ Everyone connects to the same server address. Each friend makes their own accoun
 | `PORT` | `3000` | HTTP/WebSocket port |
 | `HOST` | `0.0.0.0` | Interface to listen on (`127.0.0.1` = this PC only) |
 | `YOINK_DB` | `data/yoink.db` | SQLite database file |
-| `TRUST_PROXY` | unset | Set to `1` when running behind a reverse proxy/tunnel that sets `X-Forwarded-For` |
+| `TRUST_PROXY` | unset | Number of reverse proxies/tunnels in front of the server that set `X-Forwarded-For` (usually `1`), or an address/subnet list. Leave unset when players connect directly |
 | `YOINK_OPEN` | unset | Set to `1` to open the game in your browser once the server starts (the launchers do this) |
 
 ---

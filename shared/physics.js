@@ -10,15 +10,17 @@ export class CollisionWorld {
     this.boxes = [];
     this.grid = new Map();
     this.disabled = new Set();
+    // visit marks live in the world, not on the boxes: several worlds (one per
+    // match) are built from the same cached map boxes
+    this.marks = [];
     this._stamp = 1;
     for (const b of boxes) this.add(b);
   }
 
   add(b) {
     const idx = this.boxes.length;
-    b._i = idx;
-    b._s = 0;
     this.boxes.push(b);
+    this.marks.push(0);
     const cx0 = Math.floor(b.x0 / CELL), cx1 = Math.floor(b.x1 / CELL);
     const cz0 = Math.floor(b.z0 / CELL), cz1 = Math.floor(b.z1 / CELL);
     for (let cx = cx0; cx <= cx1; cx++) {
@@ -26,7 +28,7 @@ export class CollisionWorld {
         const k = cx * 73856093 ^ cz * 19349663;
         let arr = this.grid.get(k);
         if (!arr) { arr = []; this.grid.set(k, arr); }
-        arr.push(b);
+        arr.push(idx);
       }
     }
     return idx;
@@ -46,9 +48,10 @@ export class CollisionWorld {
         const arr = this.grid.get(cx * 73856093 ^ cz * 19349663);
         if (!arr) continue;
         for (let i = 0; i < arr.length; i++) {
-          const b = arr[i];
-          if (b._s === stamp) continue;
-          b._s = stamp;
+          const idx = arr[i];
+          if (this.marks[idx] === stamp) continue;
+          this.marks[idx] = stamp;
+          const b = this.boxes[idx];
           if (b.id !== undefined && this.disabled.has(b.id)) continue;
           if (b.x1 <= x0 || b.x0 >= x1 || b.z1 <= z0 || b.z0 >= z1) continue;
           if (cb(b) === true) return true;
@@ -84,9 +87,10 @@ export class CollisionWorld {
       const arr = this.grid.get(cx * 73856093 ^ cz * 19349663);
       if (arr) {
         for (let i = 0; i < arr.length; i++) {
-          const b = arr[i];
-          if (b._s === stamp) continue;
-          b._s = stamp;
+          const idx = arr[i];
+          if (this.marks[idx] === stamp) continue;
+          this.marks[idx] = stamp;
+          const b = this.boxes[idx];
           if (b.id !== undefined && this.disabled.has(b.id)) continue;
           if (filter && !filter(b)) continue;
           const hit = rayBox(ox, oy, oz, dx, dy, dz, b, bestT);

@@ -120,8 +120,11 @@ export class Chat {
   sendHistory(client, channel) {
     let msgs = [];
     if (channel === 'lobby') msgs = this.lobby;
-    else if (channel === 'party' && client.partyId) msgs = this.partyHist.get(client.partyId) || [];
-    else return;
+    else if (channel === 'party' && client.partyId) {
+      // only messages from after this player joined: party chat never leaks to newcomers
+      const since = this.services.party?.memberSince?.(client.userId) || 0;
+      msgs = (this.partyHist.get(client.partyId) || []).filter((m) => m.at >= since - 1000);
+    } else return;
     const fr = this.services.friends;
     const hidden = new Set();
     for (const m of msgs) {
@@ -156,6 +159,8 @@ export class Chat {
     for (const c of this.hub.clients.values()) if (!c.matchId) c.socket.emit('chat:msg', msg);
     this.store('lobby', msg);
   }
+
+  partyEnded(partyId) { this.partyHist.delete(partyId); }
 
   matchEnded(matchId) { setTimeout(() => this.matchHist.delete(matchId), 60_000).unref?.(); }
 }

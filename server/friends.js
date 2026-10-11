@@ -2,6 +2,10 @@
 import db from './db.js';
 import { USERNAME_RE } from '../shared/constants.js';
 
+// client payload fields: only plain strings/numbers are accepted
+const idOf = (v) => (typeof v === 'number' || typeof v === 'string' ? +v : NaN);
+const str = (v) => (typeof v === 'string' ? v : '');
+
 export class Friends {
   constructor({ hub, services }) {
     this.hub = hub;
@@ -21,12 +25,12 @@ export class Friends {
     handle('friends:list', () => ({ ok: true, ...this.state(uid) }));
     handle('friends:search', (d) => this.search(uid, d.q));
     handle('friends:request', (d) => this.request(uid, d));
-    handle('friends:accept', (d) => this.accept(uid, +d.userId));
-    handle('friends:decline', (d) => this.decline(uid, +d.userId));
-    handle('friends:cancel', (d) => this.cancel(uid, +d.userId));
-    handle('friends:remove', (d) => this.remove(uid, +d.userId));
-    handle('user:block', (d) => this.block(uid, +d.userId, d.on !== false));
-    handle('user:mute', (d) => this.mute(uid, +d.userId, d.on !== false));
+    handle('friends:accept', (d) => this.accept(uid, idOf(d.userId)));
+    handle('friends:decline', (d) => this.decline(uid, idOf(d.userId)));
+    handle('friends:cancel', (d) => this.cancel(uid, idOf(d.userId)));
+    handle('friends:remove', (d) => this.remove(uid, idOf(d.userId)));
+    handle('user:block', (d) => this.block(uid, idOf(d.userId), d.on !== false));
+    handle('user:mute', (d) => this.mute(uid, idOf(d.userId), d.on !== false));
     handle('user:report', (d) => this.report(uid, d));
   }
 
@@ -104,7 +108,7 @@ export class Friends {
 
   request(userId, d) {
     let target = null;
-    if (d.userId) target = this.user(+d.userId);
+    if (d.userId) target = this.user(idOf(d.userId));
     else if (typeof d.username === 'string') {
       const name = d.username.trim();
       if (!USERNAME_RE.test(name)) return { error: 'That is not a valid username.' };
@@ -193,17 +197,17 @@ export class Friends {
   }
 
   report(userId, d) {
-    const targetId = +d.userId;
+    const targetId = idOf(d.userId);
     if (!this.user(targetId) || targetId === userId) return { error: 'Player not found.' };
     const now = Date.now();
     const recent = (this.reportTimes.get(userId) || []).filter((t) => now - t < 3600_000);
     if (recent.length >= 10) return { error: 'You have sent too many reports. Try again later.' };
     recent.push(now);
     this.reportTimes.set(userId, recent);
-    const reason = String(d.reason || 'Other').slice(0, 40);
-    const details = String(d.details || '').slice(0, 300);
-    const message = String(d.message || '').slice(0, 200);
-    const channel = String(d.channel || '').slice(0, 20);
+    const reason = (str(d.reason) || 'Other').slice(0, 40);
+    const details = str(d.details).slice(0, 300);
+    const message = str(d.message).slice(0, 200);
+    const channel = str(d.channel).slice(0, 20);
     db.run('INSERT INTO reports (reporter_id, reported_id, reason, message, channel, created_at) VALUES (?, ?, ?, ?, ?, ?)', [userId, targetId, reason + (details ? ': ' + details : ''), message, channel, now]);
     return { ok: true };
   }

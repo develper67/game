@@ -9,7 +9,7 @@ import compression from 'compression';
 import { Server } from 'socket.io';
 import { openDb, flush } from './db.js';
 import db from './db.js';
-import { mountAuthRoutes, userFromToken, selfProfile } from './auth.js';
+import { mountAuthRoutes, userFromToken, selfProfile, purgeExpiredSessions } from './auth.js';
 import { Hub } from './hub.js';
 import { createServices } from './services.js';
 
@@ -21,10 +21,14 @@ export async function startServer(opts = {}) {
   const host = opts.host ?? process.env.HOST ?? '0.0.0.0';
   const dbFile = opts.dbFile ?? process.env.YOINK_DB ?? path.join(ROOT, 'data', 'yoink.db');
   await openDb(dbFile);
+  purgeExpiredSessions();
 
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', process.env.TRUST_PROXY === '1');
+  // TRUST_PROXY = number of proxy hops in front of the server (or an address/subnet list).
+  // Never `true`: that would let clients pick their own IP via X-Forwarded-For.
+  const tp = process.env.TRUST_PROXY;
+  if (tp && tp !== '0') app.set('trust proxy', /^\d+$/.test(tp) ? Number(tp) : tp);
   app.use(compression());
   app.use(express.json({ limit: '16kb' }));
   app.use((req, res, next) => {
@@ -97,6 +101,18 @@ export async function startServer(opts = {}) {
     hub.add(client);
     db.run('UPDATE users SET last_seen = ? WHERE id = ?', [Date.now(), userId]);
     socket.emit('hello', { user: selfProfile(user), serverTime: Date.now() });
+    // measure latency on the server (used for lag compensation; clients can't inflate it)
+    const probe = () => {
+      const t = Date.now();
+      socket.timeout(4000).emit('png', (err) => {
+        if (err) return;
+        const r = Date.now() - t;
+        client.rtt = client.rtt === undefined ? r : client.rtt * 0.7 + r * 0.3;
+      });
+    };
+    probe();
+    const probeTimer = setInterval(probe, 5000);
+    socket.on('disconnect', () => clearInterval(probeTimer));
     services.onConnect(client);
     hub.presenceChanged(userId);
 
@@ -160,6 +176,12 @@ function openBrowser(url) {
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
+  // Last line of defence: a bug in one handler must not take every match down.
+  process.on('uncaughtException', (e) => {
+    console.error('uncaught exception (server kept running):', e);
+    try { flush(); } catch { /* ignore */ }
+  });
+  process.on('unhandledRejection', (e) => console.error('unhandled rejection:', e));
   startServer({ dev: process.env.NODE_ENV !== 'production' }).then(({ port }) => {
     if (process.env.YOINK_OPEN === '1') openBrowser(`http://localhost:${port}`);
   }).catch((e) => {

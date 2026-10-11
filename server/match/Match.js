@@ -77,6 +77,8 @@ export class Match {
       reloadUntil: 0, reloadSlot: -1, healUntil: 0, healType: null, search: null,
       speedMul: 1, frozen: false, disconnectedAt: 0, actBudget: 40, actRefill: Date.now(),
       lastShotSeq: 0,
+      moveBudget: 0, budgetT: 0, stBudget: 20, stRefill: Date.now(), airY: 0, airT: 0,
+      nextShotAt: 0, wasIt: false,
     };
     this.byNum.push(p);
     this.players.set(p.pid, p);
@@ -124,12 +126,14 @@ export class Match {
     client.matchId = this.id;
     const s = client.socket;
     s.join(this.room);
+    // a bad packet must never throw out of a socket listener (that would kill the process)
+    const guard = (fn) => (...a) => { try { fn(...a); } catch (e) { console.error('match handler error', e); } };
     const h = {
-      vote: (mapId) => this.onVote(p, mapId),
-      ready: () => this.onReady(p),
-      st: (d) => this.onState(p, d),
-      act: (d) => this.onAct(p, d),
-      leave: () => this.leave(p, 'left'),
+      vote: guard((mapId) => this.onVote(p, mapId)),
+      ready: guard(() => this.onReady(p)),
+      st: guard((d) => this.onState(p, d)),
+      act: guard((d) => this.onAct(p, d)),
+      leave: guard(() => this.leave(p, 'left')),
     };
     p.handlers = h;
     s.on('match:vote', h.vote);
@@ -204,8 +208,9 @@ export class Match {
   onVote(p, mapId) {
     if (this.state !== 'voting') return;
     if (typeof mapId !== 'string' || !MAP_IDS.includes(mapId)) return;
+    if (this.votes.get(p.pid) === mapId) return;
     this.votes.set(p.pid, mapId);
-    this.sendVoteState();
+    this.voteDirty = true; // broadcast from tick, at most every 250 ms
   }
 
   finishVote() {
@@ -250,7 +255,8 @@ export class Match {
       p.ready = true;
       if (this.humans().every((h) => h.ready || !h.connected)) this.beginCountdown();
     } else if (this.state === 'countdown' || this.state === 'playing') {
-      // rejoining player finished loading
+      // rejoining player finished loading (once per rejoin)
+      if (p.ready) return;
       p.ready = true;
       this.emitTo(p, 'match:init', this.initPayload(p));
     }
@@ -282,6 +288,7 @@ export class Match {
     p.x = x; p.y = y + 0.02; p.z = z; p.vx = p.vy = p.vz = 0; p.yaw = yaw ?? p.yaw; p.pitch = 0;
     p.tpSeq++;
     p.lastSt = Date.now();
+    this.resetMoveCheck(p);
     p.hist.length = 0;
     this.emitTo(p, 'tp', { x: r2(p.x), y: r2(p.y), z: r2(p.z), yaw: r3(p.yaw), seq: p.tpSeq });
   }
@@ -302,6 +309,7 @@ export class Match {
       mode: this.modeId,
       mapId: this.mapId,
       you: p.num,
+      tpSeq: p.tpSeq,
       state: this.state,
       countdownEndsAt: this.countdownEndsAt,
       serverTime: Date.now(),
@@ -422,15 +430,17 @@ export class Match {
     if (this.state === 'voting') {
       this.votes.delete(p.pid);
       this.sendVoteState();
+      p.alive = false;
     } else {
       if (p.alive && (this.state === 'playing' || this.state === 'countdown')) {
         if (this.mode.combat) this.dropInventory(p);
-        p.alive = false;
         p.eliminatedAt = Date.now();
       }
+      p.alive = false;
       this.ev({ k: 'left', n: p.num });
       this.announce(`${p.name} left the match.`);
       if (this.state === 'playing') this.mode.onLeave?.(p);
+      if (this.state === 'loading' && this.humans().length && this.humans().every((h) => h.ready || !h.connected)) this.beginCountdown();
     }
     if (this.humans().length === 0 && !this.ended) {
       this.ended = true;
@@ -472,7 +482,12 @@ export class Match {
     const now = Date.now();
     try {
       if (this.state === 'voting') {
-        if (now >= this.voteEndsAt) this.finishVote();
+        if (now >= this.voteEndsAt) { this.voteDirty = false; this.finishVote(); return; }
+        if (this.voteDirty && now - (this.lastVoteSent || 0) >= 250) {
+          this.voteDirty = false;
+          this.lastVoteSent = now;
+          this.sendVoteState();
+        }
         return;
       }
       if (this.state === 'loading') {
@@ -580,11 +595,19 @@ export class Match {
 
   // ------------------------------------------------------------------ input
   onState(p, d) {
+    // only once the map exists; during voting/loading there is nothing to move in
+    if (!this.world || !(this.state === 'countdown' || this.state === 'playing' || this.state === 'ended')) return;
     if (!Array.isArray(d) || d.length < 8) return;
+    for (let i = 1; i < 8; i++) if (typeof d[i] !== 'number') return;
     const now = Date.now();
-    const x = +d[1], y = +d[2], z = +d[3], yaw = +d[4], pitch = +d[5], flags = d[6] | 0, tpSeq = d[7] | 0;
+    // packet rate limit (client sends 20/s); extra packets are simply dropped
+    p.stBudget = Math.min(20, p.stBudget + (now - p.stRefill) * 0.04);
+    p.stRefill = now;
+    if (p.stBudget < 1) return;
+    p.stBudget--;
+    const x = d[1], y = d[2], z = d[3], yaw = d[4], pitch = d[5], flags = d[6] | 0, tpSeq = d[7] | 0;
     if (![x, y, z, yaw, pitch].every(Number.isFinite)) return;
-    if (d[8] !== undefined && Number.isFinite(+d[8])) p.rtt = Math.max(0, Math.min(1000, +d[8]));
+    if (typeof d[8] === 'number' && Number.isFinite(d[8])) p.rtt = Math.max(0, Math.min(1000, d[8]));
     p.yaw = yaw;
     p.pitch = Math.max(-1.55, Math.min(1.55, pitch));
     if (tpSeq !== p.tpSeq) return; // packet from before a teleport
@@ -593,29 +616,68 @@ export class Match {
       if (Math.hypot(x - p.x, z - p.z) > 0.6) this.correct(p);
       return;
     }
-    const dt = Math.min(1.0, Math.max(0.016, (now - (p.lastSt || now)) / 1000));
     const dx = x - p.x, dz = z - p.z, dy = y - p.y;
     const horiz = Math.hypot(dx, dz);
-    let maxH = PHYS.SPRINT_SPEED * Math.max(1, p.speedMul) * dt * 1.45 + 0.8;
-    if (now < p.kbUntil) maxH += 16 * dt + 2;
-    const maxUp = 1.4 + 10 * dt + (now < p.kbUntil ? 3 : 0);
-    if (horiz > maxH || dy > maxUp) return this.correct(p);
+    const kb = now < p.kbUntil;
+    // horizontal: a distance budget that refills at top speed, so sending
+    // packets faster or bunching them cannot add up to a speed hack
+    const rate = PHYS.SPRINT_SPEED * p.speedMul * 1.3 + 0.6 + (kb ? 16 : 0);
+    const cap = rate * 0.45 + 0.9 + (kb ? 3 : 0);
+    p.moveBudget = Math.min(cap, p.moveBudget + rate * Math.min(1, (now - p.budgetT) / 1000));
+    p.budgetT = now;
+    if (horiz > p.moveBudget) return this.correct(p);
+    // vertical: climbing is limited to a jump arc from the last ground contact
+    const ground = this.world.groundHeight(x, z, y + 0.05, PHYS.RADIUS - 0.04);
+    const grounded = y - ground < 0.3;
+    if (grounded || kb) { p.airY = Math.max(y, ground); p.airT = now; }
+    else {
+      const t = Math.max(0, (now - p.airT) / 1000 - 0.25);
+      const v = PHYS.JUMP_SPEED, g = -PHYS.GRAVITY;
+      const tApex = v / g;
+      const rise = t < tApex ? v * t - 0.5 * g * t * t : (v * v) / (2 * g) - 0.5 * g * (t - tApex) * (t - tApex);
+      if (y > p.airY + Math.max(rise, 0) + 0.9 + PHYS.STEP_HEIGHT) return this.correct(p);
+    }
     // inside a solid?
     if (this.world.overlaps(x - 0.2, y + 0.2, z - 0.2, x + 0.2, y + 1.55, z + 0.2, (b) => !b.noPlayer)) return this.correct(p);
-    // passed through a wall?
+    // passed through a wall, fence or railing? (knee, waist and head height)
     if (horiz > 0.05) {
-      const ny = Math.max(y, p.y) + 1.0;
-      const hit = this.world.raycast(p.x, ny, p.z, dx / horiz, 0, dz / horiz, horiz, (b) => !b.noPlayer);
-      if (hit && hit.t < horiz - 0.05) return this.correct(p);
+      const base = Math.max(y, p.y);
+      for (const hgt of [0.62, 1.0, 1.45]) {
+        const hit = this.world.raycast(p.x, base + hgt, p.z, dx / horiz, 0, dz / horiz, horiz, (b) => !b.noPlayer);
+        if (hit && hit.t < horiz - 0.05) return this.correct(p);
+      }
     }
+    // dropped through a floor or roof?
+    if (dy < -0.25) {
+      const hit = this.world.raycast(x, p.y + 0.3, z, 0, -1, 0, -dy, (b) => !b.noPlayer);
+      if (hit && hit.t > 0.02 && hit.t < -dy - 0.05) return this.correct(p);
+    }
+    p.moveBudget -= horiz;
     p.x = x; p.y = y; p.z = z;
     p.flags = flags;
+    p.onGround = !!(flags & 4);
     p.lastSt = now;
+  }
+
+  resetMoveCheck(p) {
+    const now = Date.now();
+    p.moveBudget = PHYS.SPRINT_SPEED * 0.5 + 1;
+    p.budgetT = now;
+    p.airY = p.y;
+    p.airT = now;
+  }
+
+  // round-trip time used for lag compensation: measured by the server, the
+  // client-reported value can only make it smaller
+  rttOf(p) {
+    const measured = p.client && Number.isFinite(p.client.rtt) ? p.client.rtt : 150;
+    return Math.max(0, Math.min(measured, p.rtt, 400));
   }
 
   correct(p) {
     p.tpSeq++;
     p.vx = p.vy = p.vz = 0;
+    this.resetMoveCheck(p);
     this.emitTo(p, 'tp', { x: r2(p.x), y: r2(p.y), z: r2(p.z), seq: p.tpSeq, keepLook: true });
   }
 
@@ -634,10 +696,10 @@ export class Match {
       case 'punch': return this.punch(p);
       case 'shoot': return this.shoot(p, d);
       case 'reload': return this.reload(p);
-      case 'slot': return this.selectSlot(p, d.s | 0);
+      case 'slot': return typeof d.s === 'number' ? this.selectSlot(p, d.s | 0) : undefined;
       case 'use': return this.use(p, d);
       case 'heal': return this.heal(p);
-      case 'craft': return this.craft(p, d.r);
+      case 'craft': return typeof d.r === 'string' ? this.craft(p, d.r) : undefined;
       case 'drop': return this.dropHeld(p);
       default:
     }
@@ -645,21 +707,35 @@ export class Match {
 
   eye(p) { return { x: p.x, y: p.y + PHYS.EYE_HEIGHT, z: p.z }; }
 
+  // Can p reach a point with their hands (no wall or floor in between)? Mirrors
+  // the client's interaction check, with a little extra slack for latency.
+  canReach(p, x, y, z, ignoreId) {
+    const e = this.eye(p);
+    const dx = x - e.x, dy = y - e.y, dz = z - e.z;
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist < 0.9) return true;
+    const hit = this.world.raycast(e.x, e.y, e.z, dx / dist, dy / dist, dz / dist, dist, (b) => !b.glass && !b.noPlayer && b.m !== 'container' && b.m !== 'bench' && b.id !== ignoreId);
+    return !hit || hit.t >= dist - 0.8;
+  }
+
   // ------------------------------------------------------------------ melee
   findPunchTarget(p, range = FISTS.range) {
     const e = this.eye(p);
     const dir = lookDir(p.yaw, p.pitch);
+    // humans see others ~interp delay + half rtt in the past: judge the punch there
+    const rewindT = p.isBot ? Date.now() : Date.now() - Math.min(300, this.rttOf(p) / 2 + NET.INTERP_DELAY_MS);
     let best = null, bestD = Infinity;
     for (const q of this.byNum) {
       if (q === p || !q.alive || q.left) continue;
-      const cx = q.x, cy = q.y + 1.1, cz = q.z;
+      const pos = this.positionAt(q, rewindT);
+      const cx = pos.x, cy = pos.y + 1.1, cz = pos.z;
       const dx = cx - e.x, dy = cy - e.y, dz = cz - e.z;
       const dist = Math.hypot(dx, dy, dz);
-      const hd = Math.hypot(q.x - p.x, q.z - p.z);
-      if (hd > range + 0.35 || Math.abs(q.y - p.y) > 1.8) continue;
+      const hd = Math.hypot(pos.x - p.x, pos.z - p.z);
+      if (hd > range + 0.35 || Math.abs(pos.y - p.y) > 1.8) continue;
       const dot = (dx * dir.x + dy * dir.y + dz * dir.z) / (dist || 1);
       // horizontal facing check is more forgiving than full 3D aim
-      const hdot = ((q.x - p.x) * dir.x + (q.z - p.z) * dir.z) / ((hd || 1) * (Math.hypot(dir.x, dir.z) || 1));
+      const hdot = ((pos.x - p.x) * dir.x + (pos.z - p.z) * dir.z) / ((hd || 1) * (Math.hypot(dir.x, dir.z) || 1));
       if (hd > 1.0 && dot < 0.72 && hdot < 0.8) continue;
       if (!lineOfSight(this.world, e.x, e.y, e.z, cx, cy, cz)) continue;
       if (dist < bestD) { bestD = dist; best = q; }
@@ -701,9 +777,12 @@ export class Match {
     const w = heldWeapon(p);
     if (!w || !this.mode.combat) return;
     const def = WEAPONS[w.t];
-    if (now - p.cd.shoot < def.interval * 1000 * 0.82) return;
+    // fire rate: small per-shot jitter allowance, but no long-run speed-up
+    const iv = def.interval * 1000;
+    if (now < p.nextShotAt - iv * 0.2) return;
     if (p.reloadUntil > now) return;
     if (w.mag <= 0) { this.emitTo(p, 'ev', { k: 'dry' }); return; }
+    p.nextShotAt = Math.max(p.nextShotAt, now - iv * 0.2) + iv;
     p.cd.shoot = now;
     p.healUntil = 0;
     w.mag--;
@@ -717,10 +796,11 @@ export class Match {
       }
     }
     const e = this.eye(p);
-    const rewindT = p.isBot ? now : now - Math.min(300, p.rtt / 2 + NET.INTERP_DELAY_MS);
+    const rewindT = p.isBot ? now : now - Math.min(300, this.rttOf(p) / 2 + NET.INTERP_DELAY_MS);
     const hits = [];
     const dmgBy = new Map();
-    const bloom = (p.flags & 1 ? 1.35 : 1) * (p.onGround === false ? 1.2 : 1) * (d.ads ? 0.55 : 1);
+    const ads = d.ads === true && !(p.flags & 2); // no aiming down sights while sprinting
+    const bloom = (p.flags & 1 ? 1.35 : 1) * (p.onGround === false ? 1.2 : 1) * (ads ? 0.55 : 1);
     for (let k = 0; k < def.pellets; k++) {
       const s = def.spread * bloom * (p.isBot ? 1 : 1);
       const dx = dir.x + (Math.random() - 0.5) * 2 * s;
@@ -765,7 +845,7 @@ export class Match {
 
   positionAt(q, t) {
     const h = q.hist;
-    if (q.isBot || h.length < 8 || t >= h[h.length - 4]) return q;
+    if (h.length < 8 || t >= h[h.length - 4]) return q;
     for (let i = h.length - 8; i >= 0; i -= 4) {
       if (h[i] <= t) {
         const t0 = h[i], t1 = h[i + 4];
@@ -881,6 +961,7 @@ export class Match {
 
   craft(p, recipeId) {
     if (!this.mode.crafting) return;
+    if (!Object.hasOwn(RECIPE_MAP, recipeId)) return;
     const r = RECIPE_MAP[recipeId];
     if (!r) return;
     const bench = this.map.benches.find((b) => Math.hypot(b.x - p.x, b.z - p.z) < 3.4 && Math.abs(b.y - p.y) < 2);
@@ -908,6 +989,7 @@ export class Match {
     p.cd.use = now + 150;
     const kind = d.k, id = d.id;
     if (typeof kind !== 'string') return;
+    if (id !== undefined && typeof id !== 'string' && typeof id !== 'number') return;
     if (this.mode.onUse && this.mode.onUse(p, d) === true) return;
     switch (kind) {
       case 'door': return this.toggleDoor(p, String(id));
@@ -923,6 +1005,7 @@ export class Match {
     if (!door) return;
     const cx = (door.x0 + door.x1) / 2, cz = (door.z0 + door.z1) / 2;
     if (Math.hypot(cx - p.x, cz - p.z) > 3.0 || Math.abs(door.y0 - p.y) > 2.5) return;
+    if (!p.isBot && !this.canReach(p, cx, door.y0 + 1.2, cz, id)) return;
     const open = !this.doorState.get(id);
     if (!open) {
       // don't close a door on somebody
@@ -949,6 +1032,7 @@ export class Match {
     const l = this.loot.get(id);
     if (!l) return;
     if (Math.hypot(l.x - p.x, l.z - p.z) > 2.6 || Math.abs(l.y - p.y) > 2.2) return;
+    if (!this.canReach(p, l.x, l.y + 0.3, l.z)) return;
     this.loot.delete(id);
     this.ev({ k: 'loot-', id, n: p.num });
     const left = giveItem(p, l);
@@ -963,6 +1047,7 @@ export class Match {
     const def = this.map.containers.find((x) => x.id === id);
     if (!c || !def || c.opened) return;
     if (Math.hypot(def.x - p.x, def.z - p.z) > 2.8 || Math.abs(def.y - p.y) > 2.2) return;
+    if (!this.canReach(p, def.x, def.y + (CONTAINER_DIMS[def.kind]?.h || 1) * 0.6, def.z, id)) return;
     if (c.searchBy && c.searchBy !== p.num) {
       const other = this.byNum[c.searchBy];
       if (other && other.search && other.search.id === id) { this.emitTo(p, 'ev', { k: 'toast', text: 'Someone is already searching that.' }); return; }
@@ -996,6 +1081,7 @@ export class Match {
     const def = this.map.resources.find((x) => x.id === id);
     if (!r || !def || r.left <= 0) return;
     if (Math.hypot(def.x - p.x, def.z - p.z) > 3.0 || Math.abs(def.y - p.y) > 2.2) return;
+    if (!this.canReach(p, def.x, def.y + 0.5, def.z, id)) return;
     const info = RESOURCE_NODES[def.kind];
     const ms = info.time * 1000;
     p.search = { kind: 'res', id, x: def.x, y: def.y, z: def.z, until: Date.now() + ms };

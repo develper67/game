@@ -302,7 +302,7 @@ export class Game {
     for (const k of d.killfeed || []) this.killfeedEntry(k, true);
     if (!this.alive) this.startSpectate();
     this.hud.center(`${MODES[this.mode].icon} ${MODES[this.mode].name}`, this.map.name, 2500);
-    this.tpSeq = d.players.find((x) => x.num === this.me) ? this.tpSeq : this.tpSeq;
+    if (typeof d.tpSeq === 'number') this.tpSeq = d.tpSeq; // resync after a rejoin
     if (this.state === 'countdown') audio.play('beep');
     this.input.lock();
   }

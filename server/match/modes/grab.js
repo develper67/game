@@ -89,7 +89,8 @@ export class GrabMode {
 
   onUse(p, d) {
     if (d.k !== 'chicken') return false;
-    if (this.item.state === 'ground' && Math.hypot(this.item.x - p.x, this.item.z - p.z) < 2.6 && Math.abs(this.item.y - p.y) < 2.2) this.pickup(p);
+    const it = this.item;
+    if (it.state === 'ground' && Math.hypot(it.x - p.x, it.z - p.z) < 2.6 && Math.abs(it.y - p.y) < 2.2 && this.m.canReach(p, it.x, it.y + 0.4, it.z)) this.pickup(p);
     return true;
   }
 

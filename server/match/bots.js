@@ -376,7 +376,7 @@ export class BotBrain {
       if (!target) return;
       this.sprint = true;
       this.setGoal({ player: target, key: 'pass' + target.num });
-      if (dist2(target, p) < 2.6 && Math.abs(target.y - p.y) < 1.5 && now >= p.cd.tag) {
+      if (dist2(target, p) < 2.6 && Math.abs(target.y - p.y) < 1.5 && now >= p.cd.tag && this.canSee(target, now)) {
         this.faceNow(target);
         this.m.use(p, { k: 'player', id: target.num });
       }
