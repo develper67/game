@@ -462,7 +462,9 @@ export class Match {
       p.handlers = null;
       p.client = null;
     }
-    if (this.state === 'voting' || this.state === 'ended') { this.leave(p, 'disconnect'); return; }
+    if (this.state === 'ended') { this.leave(p, 'disconnect'); return; }
+    // during the vote the slot (and vote) is kept: a quick reload rejoins with the party
+    if (this.state === 'voting') return;
     this.ev({ k: 'conn', n: p.num, on: false });
     if (this.state === 'loading' && this.humans().every((h) => h.ready || !h.connected)) this.beginCountdown();
     if (this.humans().every((h) => !h.connected)) {
@@ -472,6 +474,10 @@ export class Match {
 
   rejoin(p, client) {
     this.attachClient(p, client);
+    if (this.state === 'voting') {
+      this.emitTo(p, 'match:vote', { ...this.voteState(), you: p.num });
+      return;
+    }
     p.ready = false;
     this.ev({ k: 'conn', n: p.num, on: true });
     this.emitTo(p, 'match:load', { matchId: this.id, mode: this.modeId, mapId: this.mapId, you: p.num, roster: this.roster(), practice: this.practice, rejoin: true });
@@ -784,7 +790,7 @@ export class Match {
     if (w.mag <= 0) { this.emitTo(p, 'ev', { k: 'dry' }); return; }
     p.nextShotAt = Math.max(p.nextShotAt, now - iv * 0.2) + iv;
     p.cd.shoot = now;
-    p.healUntil = 0;
+    this.cancelHeal(p);
     w.mag--;
     // direction: client's aim (validated against server-known look) or from yaw/pitch
     let dir = lookDir(p.yaw, p.pitch);
@@ -866,7 +872,7 @@ export class Match {
       dmg -= absorbed;
     }
     target.hp -= dmg;
-    target.healUntil = 0;
+    this.cancelHeal(target);
     if (attacker) attacker.stats.damage += amount;
     this.emitTo(target, 'ev', { k: 'hurt', from: attacker ? attacker.num : -1, dmg: Math.round(amount), hp: Math.max(0, Math.round(target.hp)), armor: Math.round(target.armor) });
     if (target.brain) target.brain.onHurt(attacker);
@@ -917,7 +923,7 @@ export class Match {
     if (p.reloadUntil > now || w.mag >= def.mag || (p.inv.ammo[def.ammo] || 0) <= 0) return;
     p.reloadUntil = now + def.reload * 1000;
     p.reloadSlot = p.inv.held - 1;
-    p.healUntil = 0;
+    this.cancelHeal(p);
     this.ev({ k: 'reload', n: p.num, w: w.t, ms: def.reload * 1000 });
   }
 
@@ -926,8 +932,8 @@ export class Match {
     if (s > 0 && !p.inv.slots[s - 1]) return;
     if (p.inv.held === s) return;
     p.inv.held = s;
-    p.reloadUntil = 0;
-    p.healUntil = 0;
+    this.cancelReload(p);
+    this.cancelHeal(p);
     const w = heldWeapon(p);
     this.ev({ k: 'held', n: p.num, w: w ? w.t : null });
     this.sendInv(p);
@@ -940,11 +946,24 @@ export class Match {
     const w = p.inv.slots[s - 1];
     p.inv.slots[s - 1] = null;
     p.inv.held = 0;
-    p.reloadUntil = 0;
+    this.cancelReload(p);
     const d = lookDir(p.yaw, 0);
     this.spawnLoot({ kind: 'weapon', t: w.t, mag: w.mag }, p.x + d.x * 1.0, p.y + 0.05, p.z + d.z * 1.0);
     this.ev({ k: 'held', n: p.num, w: null });
     this.sendInv(p);
+  }
+
+  // the client shows progress bars for these, so tell it when they are cut short
+  cancelHeal(p) {
+    if (!p.healUntil) return;
+    p.healUntil = 0;
+    this.emitTo(p, 'ev', { k: 'healing', cancel: true });
+  }
+
+  cancelReload(p) {
+    if (!p.reloadUntil) return;
+    p.reloadUntil = 0;
+    this.emitTo(p, 'ev', { k: 'reload', n: p.num, cancel: true });
   }
 
   heal(p) {
@@ -955,7 +974,7 @@ export class Match {
     if (!t) { this.emitTo(p, 'ev', { k: 'toast', text: p.hp >= 100 ? 'Already at full health.' : 'No healing items.' }); return; }
     p.healType = t;
     p.healUntil = now + HEALS[t].time * 1000;
-    p.reloadUntil = 0;
+    this.cancelReload(p);
     this.emitTo(p, 'ev', { k: 'healing', t, ms: HEALS[t].time * 1000 });
   }
 

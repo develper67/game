@@ -104,6 +104,7 @@ class AudioEngine {
     const key = name + (opts.pos ? Math.round(opts.pos.x) + ',' + Math.round(opts.pos.z) : '');
     if (now - (this.lastPlay.get(key) || 0) < 25) return;
     this.lastPlay.set(key, now);
+    if (this.lastPlay.size > 300) for (const [k, t] of this.lastPlay) if (now - t > 1000) this.lastPlay.delete(k); // keys include positions
     const sp = this.spatial(opts.pos, opts.maxDist || 70);
     const vol = (opts.vol ?? 1) * sp.vol;
     if (vol < 0.01) return;

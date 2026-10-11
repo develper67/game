@@ -15,6 +15,7 @@ export class Social {
   }
 
   reset() {
+    if (this.invites) for (const inv of this.invites.values()) clearInterval(inv.timer);
     this.friends = [];
     this.incoming = [];
     this.outgoing = [];
@@ -77,7 +78,7 @@ export class Social {
   async block(u) {
     if (!(await confirmBox('Block player?', `${u.username} won't be able to message you, friend you or invite you. This also removes them as a friend.`, 'Block', 'red'))) return;
     const r = await this.req('user:block', { userId: u.id, on: true }, `${u.username} blocked.`);
-    if (r) this.app.chat.blocked.add(u.id);
+    if (r) { this.app.chat.blocked.add(u.id); this.app.chat.purgeUser(u.id); }
   }
   async unblock(u) {
     const r = await this.req('user:block', { userId: u.id, on: false }, `${u.username} unblocked.`);
@@ -125,6 +126,7 @@ export class Social {
     audio.play('invite');
     const total = inv.expiresAt - this.app.net.serverNow();
     const timer = setInterval(() => {
+      if (!this.app.net) { this.removeInvite(inv.id); return; }
       const left = inv.expiresAt - this.app.net.serverNow();
       bar.style.width = Math.max(0, (left / Math.max(1, total)) * 100) + '%';
       if (left <= 0) this.removeInvite(inv.id, 'This invitation expired.');
@@ -157,11 +159,15 @@ export class Social {
           h('div', { class: 'hint' }, h('span', { class: 'status-dot ' + p.status }), statusText),
           h('div', { class: 'hint', text: `Joined ${new Date(p.createdAt).toLocaleDateString()}${p.status === 'offline' && p.lastSeen ? ' · last seen ' + timeAgo(p.lastSeen) : ''}` }))),
       h('div', { class: 'stats-grid' },
-        stat(p.wins, 'Wins'), stat(p.matches, 'Matches'), stat(p.elims, 'Eliminations'), stat(p.skinCount, 'Skins')),
+        stat(p.wins, 'Wins'), stat(p.matches, 'Matches'), stat(p.elims, 'Eliminations'), stat('🪙 ' + p.coins, 'Coins'), stat(p.skinCount, 'Skins')),
       h('div', { class: 'section-title', text: 'Mode wins / played' }),
       h('div', { class: 'pill-list' }, MODE_IDS.map((md) => h('span', { class: 'pill', text: `${MODES[md].icon} ${p.modeStats[md].wins}/${p.modeStats[md].matches}` }))),
       h('div', { class: 'section-title', text: 'Equipped skins' }),
       Object.keys(p.equipped).length ? h('div', { class: 'pill-list' }, Object.entries(p.equipped).map(([w, s]) => h('span', { class: 'pill r-' + SKINS[s].rarity, text: `${WEAPONS[w].name}: ${SKINS[s].short}` }))) : h('div', { class: 'hint', text: 'None' }),
+      h('div', { class: 'section-title', text: `Unlocked skins (${p.skinCount})` }),
+      p.skins && p.skins.length
+        ? h('div', { class: 'pill-list', style: { maxHeight: '120px', overflowY: 'auto' } }, p.skins.filter((s) => SKINS[s]).map((s) => h('span', { class: 'pill r-' + SKINS[s].rarity, text: `${WEAPONS[SKINS[s].weapon]?.name || ''}: ${SKINS[s].short}` })))
+        : h('div', { class: 'hint', text: 'No skins unlocked yet.' }),
       actions),
     [{ label: 'Close', class: 'gray' }]);
     if (!p.self) {

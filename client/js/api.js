@@ -12,8 +12,15 @@ export const session = {
       if (remember) localStorage.setItem(KEY, token); else localStorage.removeItem(KEY);
     } catch { /* storage unavailable */ }
   },
+  // this tab keeps its own copy, so another tab can't take the login away from it
+  adopt(token) {
+    try { sessionStorage.setItem(KEY, token); } catch { /* storage unavailable */ }
+  },
   clear() {
     try { sessionStorage.removeItem(KEY); localStorage.removeItem(KEY); } catch { /* ignore */ }
+  },
+  clearTab() {
+    try { sessionStorage.removeItem(KEY); } catch { /* ignore */ }
   },
 };
 

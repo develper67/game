@@ -25,6 +25,8 @@ export class Matchmaking {
     s.on('queue:join', (d, ack) => this.safe(ack, () => this.join(client, d)));
     s.on('queue:leave', (d, ack) => this.safe(ack, () => this.leaveQueue(client, true)));
     s.on('queue:startNow', (d, ack) => this.safe(ack, () => this.startNow(client)));
+    // lets a reconnecting client find out whether its match still exists
+    s.on('match:status', (d, ack) => this.safe(ack, () => ({ matchId: client.matchId || null })));
   }
 
   safe(ack, fn) {
@@ -180,7 +182,6 @@ export class Matchmaking {
     const found = this.findMatchFor(client.userId);
     if (found) {
       const { m, p } = found;
-      if (m.state === 'voting') { m.leave(p); return; }
       m.rejoin(p, client);
       this.hub.presenceChanged(client.userId);
     }

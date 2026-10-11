@@ -35,8 +35,10 @@ class App {
     const token = session.token;
     if (token) {
       const me = await api.me();
-      if (me.user) return this.enter(me.user);
-      session.clear();
+      if (me.user) { session.adopt(token); return this.enter(me.user); }
+      if (me.status === 401) session.clear();
+      this.showAuth(me.status === 401 ? undefined : me.error);
+      return;
     }
     this.showAuth();
   }
@@ -56,9 +58,16 @@ class App {
   }
 
   // ---------------------------------------------------------------- auth
+  // Back to the login screen: drop everything that belonged to the previous session.
   showAuth(message) {
+    clearTimeout(this.resultsTimer);
+    this.disposeGame();
     if (this.net) { this.net.close(); this.net = null; }
     this.user = null;
+    this.queue = null;
+    this.matchId = null;
+    this.social.reset();
+    this.chat.reset();
     this.setScreen(new AuthScreen(this, message));
   }
 
@@ -86,7 +95,6 @@ class App {
     if (this.game) return toast('Leave the match first.', 'error');
     await api.logout();
     session.clear();
-    this.social.reset();
     this.showAuth('You have been logged out.');
   }
 
@@ -96,37 +104,63 @@ class App {
     this.social.bind(net);
     net.on('hello', (d) => { this.setUser(d.user); });
     net.on('net:unauthorized', () => { session.clear(); this.showAuth('Your session is no longer valid. Please log in again.'); });
-    net.on('auth:kicked', (d) => { this.disposeGame(); session.clear(); this.showAuth(d.reason || 'Disconnected.'); });
-    net.on('auth:logout', () => { this.disposeGame(); session.clear(); this.showAuth('You were logged out.'); });
+    // the session is still valid (another tab took over): only forget this tab's copy
+    net.on('auth:kicked', (d) => { session.clearTab(); this.showAuth(d.reason || 'Disconnected.'); });
+    net.on('auth:logout', () => { session.clear(); this.showAuth('You were logged out.'); });
     net.on('user:update', (u) => this.setUser(u));
     net.on('queue:update', (q) => { this.queue = q; this.changed('queue'); });
     net.on('queue:left', () => { this.queue = null; this.changed('queue'); });
     net.on('match:vote', (d) => this.onVote(d));
     net.on('match:load', (d) => this.onLoad(d));
     net.on('match:end', (d) => this.onEnd(d));
-    net.on('net:disconnect', () => this.changed('net'));
-    net.on('net:connect', () => this.changed('net'));
+    // the server drops queues on disconnect without telling us
+    net.on('net:disconnect', () => { this.queue = null; this.changed('queue'); this.changed('net'); });
+    net.on('net:connect', () => { this.changed('net'); this.checkMatchAfterReconnect(); });
   }
 
   // ---------------------------------------------------------------- screens
   showMenu(tab) {
+    if (this.keepScreenUntil && performance.now() < this.keepScreenUntil) return;
     if (this.screen instanceof MenuScreen) { if (tab) this.screen.setTab(tab); return; }
     this.setScreen(new MenuScreen(this, tab));
     audio.startMusic();
+  }
+
+  // A new match starts: forget the previous match's chat.
+  enterMatch(matchId) {
+    if (this.matchId !== matchId) this.chat.clearMatch();
+    this.matchId = matchId;
+    clearTimeout(this.resultsTimer);
   }
 
   onVote(d) {
     this.queue = null;
     this.lastMode = d.mode;
     this.lastPractice = d.practice;
+    this.enterMatch(d.matchId);
     if (this.screen instanceof VoteScreen && this.screen.matchId === d.matchId) this.screen.update(d);
-    else this.setScreen(new VoteScreen(this, d));
+    else { this.disposeGame(); this.setScreen(new VoteScreen(this, d)); }
+  }
+
+  // After a reconnect the match we were showing may be gone (ended or timed out
+  // while we were away): the server tells us which match, if any, we are still in.
+  async checkMatchAfterReconnect() {
+    if (!this.net || !(this.game || this.screen instanceof VoteScreen)) return;
+    const r = await this.net.request('match:status', {});
+    if (!r || r.error || !this.net) return;
+    if (r.matchId && r.matchId === this.matchId) return;
+    if (this.screen instanceof ResultsScreen) return;
+    this.disposeGame();
+    this.matchId = null;
+    this.showMenu('play');
+    toast('That match ended while you were disconnected.', 'info');
   }
 
   async onLoad(d) {
     this.queue = null;
     this.lastMode = d.mode;
     this.lastPractice = d.practice;
+    this.enterMatch(d.matchId);
     if (this.game && this.game.matchId === d.matchId && !this.game.disposed) {
       // reconnected to the same match: ask for a fresh snapshot
       this.net.emit('match:ready');
@@ -140,11 +174,13 @@ class App {
     this.game = game;
     try {
       await game.load(d, (p, label) => loading.progress(p, label));
+      if (this.game !== game) { game.dispose(); return; }
       this.root.classList.add('hidden');
     } catch (e) {
+      if (e.cancelled || this.game !== game) return; // replaced or logged out while loading
       console.error(e);
       toast('Failed to load the match: ' + e.message, 'error');
-      this.net.emit('match:leave');
+      this.net?.emit('match:leave');
       this.disposeGame();
       this.showMenu();
     }
@@ -156,12 +192,19 @@ class App {
     const won = me && me.won;
     if (d.profile) this.setUser(d.profile);
     audio.play(won ? 'win' : 'lose');
-    if (g && !g.disposed) {
+    clearTimeout(this.resultsTimer);
+    if (g && !g.disposed && g.running) {
       g.end();
       g.hud.center(won ? '🏆 VICTORY!' : 'DEFEAT', d.reason, 3000);
       if (won) g.effects.confetti(g.camera.position.x, g.camera.position.y + 1, g.camera.position.z, 150);
-      setTimeout(() => { if (this.game === g) this.disposeGame(); this.setScreen(new ResultsScreen(this, d)); }, 2600);
+      // only if nothing else (a new vote, the login screen) took over meanwhile
+      this.resultsTimer = setTimeout(() => {
+        if (this.game !== g) return;
+        this.disposeGame();
+        this.setScreen(new ResultsScreen(this, d));
+      }, 2600);
     } else {
+      this.disposeGame(); // still loading (rejoin): skip straight to the results
       this.setScreen(new ResultsScreen(this, d));
     }
   }
@@ -174,8 +217,9 @@ class App {
   async leaveMatchConfirm() {
     const ok = await confirmBox('Leave match?', 'You will forfeit this match and earn no rewards for it.', 'Leave', 'red');
     if (!ok) return;
-    this.net.emit('match:leave');
+    this.net?.emit('match:leave');
     this.disposeGame();
+    this.matchId = null;
     this.showMenu();
   }
 
@@ -185,6 +229,9 @@ class App {
     this.lastPractice = practice;
     const r = await this.net.request('queue:join', { mode, practice });
     if (r.error) { toast(r.error, 'error'); audio.play('error'); return false; }
+    // practice matches start right away: their map vote arrives before this answer,
+    // so a caller's "go back to the menu" must not replace the vote screen
+    if (this.screen instanceof VoteScreen) this.keepScreenUntil = performance.now() + 800;
     return true;
   }
 

@@ -30,6 +30,28 @@ export class ChatStore {
 
   hidden(m) { return !m.system && (this.muted.has(m.fromId) || this.blocked.has(m.fromId)); }
 
+  // logout / account switch: nothing from the previous session may remain
+  reset() {
+    for (const ch of Object.keys(this.channels)) this.channels[ch] = [];
+    this.muted = new Set();
+    this.blocked = new Set();
+    this.unread = { lobby: 0, party: 0 };
+    this.emit(null, null);
+  }
+
+  // a new match starts: its chat starts empty
+  clearMatch() {
+    this.channels.game = [];
+    this.channels.gameparty = [];
+    this.emit('game', null);
+  }
+
+  // drop everything a user said (after blocking or muting them)
+  purgeUser(userId) {
+    for (const ch of Object.keys(this.channels)) this.channels[ch] = this.channels[ch].filter((m) => m.fromId !== userId);
+    this.emit(null, null);
+  }
+
   add(m) {
     const ch = m.channel;
     if (!this.channels[ch]) return;
@@ -88,8 +110,7 @@ export class ChatStore {
     const r = await this.app.net.request('user:mute', { userId: user.id, on });
     if (r.error) return toast(r.error, 'error');
     if (on) this.muted.add(user.id); else this.muted.delete(user.id);
-    if (on) for (const ch of Object.keys(this.channels)) this.channels[ch] = this.channels[ch].filter((m) => m.fromId !== user.id);
-    this.emit(null, null);
+    if (on) this.purgeUser(user.id); else this.emit(null, null);
     toast(on ? `${user.username} is muted. Their messages are hidden.` : `${user.username} is unmuted.`, 'good');
   }
 
@@ -97,8 +118,7 @@ export class ChatStore {
     const r = await this.app.net.request('user:block', { userId: user.id, on });
     if (r.error) return toast(r.error, 'error');
     if (on) this.blocked.add(user.id); else this.blocked.delete(user.id);
-    if (on) for (const ch of Object.keys(this.channels)) this.channels[ch] = this.channels[ch].filter((m) => m.fromId !== user.id);
-    this.emit(null, null);
+    if (on) this.purgeUser(user.id); else this.emit(null, null);
     toast(on ? `${user.username} is blocked: no messages, friend requests or invites from them.` : `${user.username} is unblocked.`, 'good');
     this.app.refreshFriends?.();
   }

@@ -75,6 +75,7 @@ export class Game {
     setTextureSize(this.quality === 'low' ? 128 : 256);
     onProgress(0.1, 'Generating map…');
     await tick();
+    if (this.disposed) throw cancelled(); // left/kicked while loading
     this.map = getMap(data.mapId);
     this.mapName = this.map.name;
     this.world = new CollisionWorld(this.map.boxes.filter((b) => b.col !== false));
@@ -82,6 +83,7 @@ export class Game {
     for (const d of this.map.doors) { this.doorOpen.set(d.id, !!d.open); this.world.setDisabled(d.id, !!d.open); }
     onProgress(0.3, 'Building the world…');
     await tick();
+    if (this.disposed) throw cancelled(); // left/kicked while loading
 
     // renderer + scenes
     const q = this.quality;
@@ -127,6 +129,7 @@ export class Game {
     this.worldObjs = built;
     onProgress(0.7, 'Spawning players…');
     await tick();
+    if (this.disposed) throw cancelled(); // left/kicked while loading
 
     this.effects = new Effects(this.scene, q);
     if (this.map.weather) this.effects.setWeather(this.map.weather);
@@ -152,7 +155,8 @@ export class Game {
     this.hudWrap = h('div', { style: { position: 'absolute', inset: '0', pointerEvents: 'none' } });
     this.root.appendChild(this.hudWrap);
     this.hud = new Hud(this.hudWrap, this);
-    this.clickCatcher = h('div', { style: { position: 'absolute', inset: '0' }, onClick: () => { if (!this.panel && !this.chatOpen) this.input.lock(); } });
+    // clicking the 3D view always gets the player back into the game (closes an open chat box)
+    this.clickCatcher = h('div', { style: { position: 'absolute', inset: '0' }, onClick: () => { if (this.chatOpen) this.closeChat(); else if (!this.panel) this.input.lock(); } });
     this.root.insertBefore(this.clickCatcher, this.hudWrap);
     this.buildGameChat();
 
@@ -202,7 +206,7 @@ export class Game {
     const sendBtn = h('button', { class: 'btn small cyan', type: 'submit', text: 'Send' });
     const form = h('form', { onSubmit: (e) => { e.preventDefault(); this.sendChat(input.value); input.value = ''; this.closeChat(); } }, chanBtn, input, sendBtn);
     input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); input.value = ''; this.closeChat(); } e.stopPropagation(); });
-    this.gameChatEl = h('div', { class: 'game-chat' }, lines, form, h('div', { class: 'hint', text: `Press ${keyName(settings.keys.chat)} or T to chat` }));
+    this.gameChatEl = h('div', { class: 'game-chat' }, lines, form, h('div', { class: 'hint', text: `Press ${keyName(settings.keys.chat)}${Object.values(settings.keys).includes('KeyT') ? '' : ' or T'} to chat` }));
     this.gameChatLines = lines;
     this.gameChatInput = input;
     this.hudWrap.appendChild(this.gameChatEl);
@@ -438,6 +442,7 @@ export class Game {
       }
       case 'elim': this.killfeedEntry(e); break;
       case 'reload': {
+        if (e.cancel) { if (e.n === this.me) { this.vm.cancelReload?.(); this.hud.stopProgress(); } break; }
         if (e.n === this.me) { this.vm.reload(e.ms); audio.play('reload', { ms: e.ms }); this.hud.startProgress('Reloading…', e.ms); }
         else audio.play('reload', { pos: posOf(e.n), ms: e.ms, vol: 0.5 });
         break;
@@ -484,7 +489,15 @@ export class Game {
         if ((e.items || []).length) audio.play('pickup');
         break;
       }
-      case 'healing': this.hud.startProgress(`Using ${HEALS[e.t].name}…`, e.ms); this.vm.showHealItem(e.t); setTimeout(() => this.vm.showHealItem(null), e.ms); break;
+      case 'healing': {
+        clearTimeout(this.healItemTimer);
+        if (e.cancel) { this.hud.stopProgress(); this.vm.showHealItem(null); this.healUntil = 0; break; }
+        this.hud.startProgress(`Using ${HEALS[e.t].name}…`, e.ms);
+        this.vm.showHealItem(e.t);
+        this.healUntil = performance.now() + e.ms;
+        this.healItemTimer = setTimeout(() => this.vm.showHealItem(null), e.ms);
+        break;
+      }
       case 'healed': {
         if (e.n === this.me) { audio.play('heal'); this.hud.pickup(`+HP (${e.hp})`, '#3ddc97'); this.vm.showHealItem(null); }
         const pp = posOf(e.n);
@@ -595,7 +608,8 @@ export class Game {
     const k = settings.keys;
     if (this.panel && this.panel.kind === 'inventory' && e.code === k.inventory) { this.closePanel(); this.input.lock(); return; }
     if (!this.input.locked) return;
-    if (e.code === k.chat || e.code === 'KeyT') { e.preventDefault(); this.openChat(); return; }
+    // T is a chat shortcut only while no action is bound to it
+    if (e.code === k.chat || (e.code === 'KeyT' && !Object.values(k).includes('KeyT'))) { e.preventDefault(); this.openChat(); return; }
     if (e.code === k.inventory && this.combat) { this.openInventory(false); }
   }
 
@@ -612,7 +626,11 @@ export class Game {
       this.pitch = Math.max(-1.54, Math.min(1.54, this.pitch));
       this.vm.mouse(m.x, m.y);
     }
+    // scoreboard works while spectating and during the countdown; hides with menus/chat
+    const sb = locked && inp.down('scoreboard');
+    if (sb !== this._sb) { this._sb = sb; this.hud.showScoreboard(sb); }
     if (!locked || this.state !== 'playing' || !this.alive) {
+      this.ads = false;
       if (locked && !this.alive && this.spectating >= 0) {
         if (inp.clicked.has(0)) this.cycleSpectate(1);
         if (inp.clicked.has(2)) this.cycleSpectate(-1);
@@ -645,9 +663,6 @@ export class Game {
       const ni = (i + (inp.wheel > 0 ? 1 : -1) + avail.length) % avail.length;
       this.selectSlot(avail[ni]);
     }
-    const sb = inp.down('scoreboard');
-    if (sb !== this._sb) { this._sb = sb; this.hud.showScoreboard(sb); }
-
     const w = this.heldWeapon();
     this.ads = !!(w && inp.buttons.has(2) && this.combat);
     if (w && this.combat) {
@@ -850,7 +865,7 @@ export class Game {
     this.updateRemotes(dt, t);
     if (!this.alive && this.spectating >= 0) {
       const p = this.players.get(this.spectating);
-      if (!p || !p.alive) this.startSpectate();
+      if (!p || !p.alive || p.left) this.startSpectate();
       else {
         cam.position.set(p.x, p.y + PHYS.EYE_HEIGHT, p.z);
         cam.rotation.set(p.pitch, p.yaw, 0);
@@ -871,7 +886,7 @@ export class Game {
     if (Math.abs(cam.fov - targetFov) > 0.05) { cam.fov += (targetFov - cam.fov) * Math.min(1, dt * 12); cam.updateProjectionMatrix(); }
     this.hud.crosshair.classList.toggle('hidden', !!(this.ads && w && w.t === 'sniper'));
     this.hud.crosshair.classList.toggle('dot', !!this.ads);
-    audio.setListener(cam.position.x, cam.position.y, cam.position.z, this.yaw);
+    audio.setListener(cam.position.x, cam.position.y, cam.position.z, cam.rotation.y); // follows the spectated view too
 
     // interaction prompt (10 Hz)
     this.interactCheckT -= dt;
@@ -1119,12 +1134,11 @@ export class Game {
     window.removeEventListener('resize', this.onResize);
     if (this.input) this.input.dispose();
     if (this.hud) this.hud.dispose();
+    // free GPU memory before the next match (three.js re-uploads anything reused later)
+    if (this.scene) disposeTree(this.scene);
+    if (this.vm && this.vm.scene) disposeTree(this.vm.scene);
+    if (this.sun && this.sun.shadow && this.sun.shadow.map) this.sun.shadow.map.dispose();
     if (this.effects) this.effects.dispose();
-    if (this.scene) {
-      this.scene.traverse((o) => {
-        if (o.geometry && !o.geometry.userData?.shared) o.geometry.dispose?.();
-      });
-    }
     clear(this.root);
     this.root.classList.add('hidden');
     if (this.renderer) this.renderer.renderLists.dispose();
@@ -1132,6 +1146,17 @@ export class Game {
 }
 
 function tick() { return new Promise((r) => setTimeout(r, 0)); }
+function disposeTree(root) {
+  root.traverse((o) => {
+    if (o.geometry) o.geometry.dispose?.();
+    const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+    for (const m of mats) {
+      for (const v of Object.values(m)) if (v && v.isTexture) v.dispose();
+      m.dispose?.();
+    }
+  });
+}
+function cancelled() { const e = new Error('Loading was cancelled.'); e.cancelled = true; return e; }
 function r2(v) { return Math.round(v * 100) / 100; }
 function r3(v) { return Math.round(v * 1000) / 1000; }
 function lerpAngle(a, b, k) { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return a + d * k; }
