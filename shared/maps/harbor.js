@@ -145,7 +145,37 @@ export function build() {
   ];
   for (const [x, z, yaw] of spawns) { b.spawn(x, 0.05, z, yaw); R.addCentered(x, z, 2.5, 2.5); }
 
+  // ---------------- dock life
+  // red & white lighthouse on a rocky islet out in the water (landmark, out of reach)
+  lighthouse(b, 56, -54);
+  // moored boats, buoys, mooring cleats on the piers, quay lamps
+  b.prop('boat', -36.5, -1.45, -49, 0, 1.2, { color: 0xe8590c });
+  b.prop('boat', -19.5, -1.45, -54, 0, 1.1, { color: 0x1c7ed6 });
+  b.prop('boat', 39.5, -1.45, -50, 2, 1.2, { color: 0x2f9e44 });
+  for (const [x, z] of [[-45, -55], [-19, -47], [34, -58], [55, -44], [-56, -46]]) b.prop('buoy', x, -1.55, z, 0, 1);
+  for (let z = -58; z <= -41; z += 5.5) {
+    b.prop('cleat', -31.6, 0, z, 1, 1); b.prop('cleat', -24.4, 0, z, 1, 1);
+    b.prop('cleat', 44.4, 0, z, 1, 1); b.prop('cleat', 51.6, 0, z, 1, 1);
+  }
+  for (let x = -54; x <= 54; x += 18) if (R.free(x, -35.6, 0.6)) { b.prop('lamp', x, 0, -35.6, 0, 1); R.addCentered(x, -35.6, 0.8, 0.8); }
+  for (const [x, z, r] of [[-14, -9.5, 1], [6.5, 1.5, 0], [-40, -32, 0]]) if (R.free(x, z, 1.4)) { b.prop('forklift', x, 0, z, r * Math.PI / 2, 1); R.addCentered(x, z, 2.4, 2.8); }
+  scatter(b, R, [-58, 20, 58, 58], 8, ['tires', 'cablespool', 'trashcan'], { r: 1.0 });
+  scatter(b, R, [-58, -36, 58, 18], 6, ['cablespool', 'tires', 'bollard'], { r: 1.0 });
   scatter(b, R, [-58, -36, 58, 58], 26, ['barrel', 'pallet', 'crate', 'cone'], { r: 1.0 });
   scatter(b, R, [-58, 20, 58, 58], 4, ['car'], { r: 3, extra: (r) => ({ color: r.pick([0x2e86de, 0xc0392b, 0xf1c40f, 0x27ae60]) }) });
   return b.build(meta);
+}
+
+// Striped lighthouse with a glowing lantern room on a rocky islet (visual landmark).
+function lighthouse(b, x, z) {
+  b.prop('bigrock', x, -2.2, z, 0, 1.3);
+  b.prop('rock', x + 2.6, -1.4, z + 1.5, 0, 1.2);
+  const r = 1.6;
+  for (let i = 0; i < 6; i++) b.cylinder(x, 0.6 + i * 1.6, z, r - i * 0.08, 1.6, 'paint', i % 2 ? 0xf8f9fa : 0xe03131, { col: false, seg: 16 });
+  b.cylinder(x, 10.2, z, 1.6, 0.3, 'metal', 0x343a40, { col: false, seg: 16 });
+  b.cylinder(x, 10.5, z, 1.05, 1.6, 'glass', 0xfff3bf, { col: false, seg: 12 });
+  b.box(x - 0.55, 10.7, z - 0.55, x + 0.55, 11.8, z + 0.55, 'light', 0xfff3bf, { col: false, emissive: true });
+  b.cylinder(x, 12.1, z, 1.3, 0.35, 'metal', 0xc92a2a, { col: false, seg: 16 });
+  b.cylinder(x, 12.45, z, 0.7, 0.5, 'metal', 0xc92a2a, { col: false, seg: 12 });
+  b.cylinder(x, 0.6, z, 2.2, 0.4, 'concrete', 0xced4da, { col: false, seg: 16 });
 }
