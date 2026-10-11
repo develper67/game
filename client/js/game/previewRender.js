@@ -12,6 +12,8 @@ export function renderPreview(mapId, w = 960, h = 540) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   document.body.style.margin = '0';
+  // on top of whatever the page styles put in the body
+  Object.assign(renderer.domElement.style, { position: 'fixed', left: '0', top: '0', zIndex: '9999' });
   document.body.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
   const env = setupEnvironment(scene, map, { quality: 'high', renderer, far: 600, fogScale: 2.2 });
