@@ -24,6 +24,7 @@ export class ArmoryTab {
   }
 
   mountedPreview() {
+    if (this.destroyed) return; // left the tab before the data arrived: no orphan WebGL preview
     if (!this.preview) this.preview = new WeaponPreview(this.previewBox);
   }
 
@@ -32,7 +33,7 @@ export class ArmoryTab {
     if (r.error) { mount(this.grid, h('p', { class: 'err', text: r.error })); return; }
     this.econ = r;
     this.app.setUser({ coins: r.coins });
-    setTimeout(() => { this.mountedPreview(); this.render(); }, 0);
+    setTimeout(() => { if (this.destroyed) return; this.mountedPreview(); this.render(); }, 0);
   }
 
   render() {
@@ -74,5 +75,5 @@ export class ArmoryTab {
     this.render();
   }
 
-  destroy() { if (this.preview) this.preview.destroy(); }
+  destroy() { this.destroyed = true; if (this.preview) { this.preview.destroy(); this.preview = null; } }
 }

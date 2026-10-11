@@ -42,6 +42,8 @@ export function settingsPanel(app, { compact = false } = {}) {
   return h('div', null, grid, h('h3', { class: 'section-title', text: 'Controls' }), controlsPanel(true));
 }
 
+let armedRebind = null;
+
 export function controlsPanel(editable = false) {
   const wrap = h('div');
   const render = () => {
@@ -50,10 +52,14 @@ export function controlsPanel(editable = false) {
       const btn = h('button', { class: 'opt-btn', style: { minWidth: '90px' }, text: keyName(settings.keys[action]) });
       if (editable) {
         btn.addEventListener('click', () => {
+          if (armedRebind) armedRebind(); // only one key can be waiting for input
           btn.textContent = 'Press a key…';
+          const disarm = () => { window.removeEventListener('keydown', onKey, true); if (armedRebind === disarm) armedRebind = null; };
           const onKey = (e) => {
+            // the settings panel was closed meanwhile: forget the pending rebind, keep the key
+            if (!wrap.isConnected) { disarm(); return; }
             e.preventDefault();
-            window.removeEventListener('keydown', onKey, true);
+            disarm();
             if (e.code === 'Escape') { render(); return; }
             for (const [a, c] of Object.entries(settings.keys)) if (c === e.code && a !== action) settings.keys[a] = settings.keys[action];
             settings.keys[action] = e.code;
@@ -61,6 +67,7 @@ export function controlsPanel(editable = false) {
             render();
           };
           window.addEventListener('keydown', onKey, true);
+          armedRebind = disarm;
         });
       } else btn.disabled = true;
       rows.push(h('div', { text: label }), btn);
