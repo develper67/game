@@ -78,6 +78,7 @@ export class Game {
     if (this.disposed) throw cancelled(); // left/kicked while loading
     this.map = getMap(data.mapId);
     this.mapName = this.map.name;
+    audio.setEnvironment(this.map.indoor ? 'indoor' : 'outdoor');
     this.world = new CollisionWorld(this.map.boxes.filter((b) => b.col !== false));
     this.doorOpen = new Map();
     for (const d of this.map.doors) { this.doorOpen.set(d.id, !!d.open); this.world.setDisabled(d.id, !!d.open); }
@@ -255,7 +256,7 @@ export class Game {
   bindNet() {
     const on = (ev, fn) => this.unsubs.push(this.net.on(ev, fn));
     on('match:init', (d) => this.onInit(d));
-    on('match:go', (d) => { this.state = 'playing'; this.goAt = performance.now(); this.setModeState(d.modeState); audio.play('go'); });
+    on('match:go', (d) => { this.state = 'playing'; this.goAt = performance.now(); this.setModeState(d.modeState); audio.play('go'); audio.startMatchMusic(this.mode); });
     on('s', (d) => this.onSnapshot(d));
     on('ev', (d) => this.onEvent(d));
     on('mode', (d) => this.setModeState(d));
@@ -308,6 +309,7 @@ export class Game {
     this.hud.center(`${MODES[this.mode].icon} ${MODES[this.mode].name}`, this.map.name, 2500);
     if (typeof d.tpSeq === 'number') this.tpSeq = d.tpSeq; // resync after a rejoin
     if (this.state === 'countdown') audio.play('beep');
+    if (this.state === 'playing' && !audio.matchBus) audio.startMatchMusic(this.mode);
     this.input.lock();
   }
 
@@ -436,6 +438,13 @@ export class Game {
       case 'hurt': {
         this.hud.hurt();
         audio.play('hurt');
+        const ap = e.from >= 0 && e.from !== this.me ? posOf(e.from) : null;
+        if (ap) {
+          // angle to the attacker relative to where we look (+ = to the right)
+          const dx = ap.x - this.body.x, dz = ap.z - this.body.z;
+          const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
+          this.hud.damageFrom(Math.atan2(dx * -fz + dz * fx, dx * fx + dz * fz));
+        }
         this.shake = Math.min(0.4, 0.1 + e.dmg / 120);
         if (this.inv) { this.inv.hp = e.hp; this.inv.armor = e.armor; }
         break;
@@ -534,11 +543,20 @@ export class Game {
     audio.play('elim', { pos: vp ? { x: vp.x, y: vp.y, z: vp.z } : null });
     if (e.victim === this.me) {
       this.alive = false;
+      this.streak = 0;
       this.hud.center('ELIMINATED', k ? `by ${k.name}` : '', 3000);
+      const left = [...this.players.values()].filter((p) => p.alive && !p.left && p.num !== this.me).length;
+      const total = [...this.players.values()].filter((p) => !p.left).length;
+      if (left > 0) setTimeout(() => this.hud && this.hud.placement(`You placed #${left + 1} of ${total}`), 900);
       audio.play('lose');
+      audio.setIntensity(0);
       setTimeout(() => this.startSpectate(), 1500);
     }
-    if (e.killer === this.me && e.victim !== this.me) this.hud.center(`Eliminated ${v?.name}!`, '', 1500);
+    if (e.killer === this.me && e.victim !== this.me) {
+      this.streak = (this.streak || 0) + 1;
+      this.hud.elimPopup(v?.name || '?', e.head, this.streak);
+      if (this.streak >= 2) audio.play('streak', { n: this.streak });
+    }
   }
 
   onShot(e) {
@@ -897,6 +915,7 @@ export class Game {
     }
 
     this.updateWorldObjects(dt, t);
+    if (this.state === 'playing' && !this.ended) this.updateTension(dt);
     this.vm.update(dt, { speed: Math.hypot(this.body.vx, this.body.vz), grounded: this.body.onGround, sprint: sprinting, ads: this.ads });
     if (this.vm.state === 'weapon' && this.inv && this.inv.held > 0 && this.vm.reloadT <= 0 && this.hud.progress && this.hud.progress.label === 'Reloading…') { /* finishes on its own */ }
     this.effects.update(dt, cam.position);
@@ -1001,6 +1020,47 @@ export class Game {
         if (this._fuseAcc > interval) { this._fuseAcc = 0; audio.play('fuse', { vol: ms.holder === this.me ? 1 : 0.5 }); }
       }
     }
+  }
+
+  // Danger warnings, heartbeat and music intensity from the current mode state.
+  updateTension(dt) {
+    const ms = this.modeState || {};
+    const me = this.body;
+    const now = this.net.serverNow();
+    const distTo = (n) => { const p = this.players.get(n); return p && p.alive && !p.left ? Math.hypot(p.x - me.x, p.z - me.z) : Infinity; };
+    let warn = null, beat = 0, hot = 0;
+    const left = ms.endsAt ? (ms.endsAt - now) / 1000 : 999;
+    if (this.mode === 'tag') {
+      if (ms.it !== this.me && this.alive) {
+        const d = distTo(ms.it);
+        if (d < 12) { warn = d < 6 ? '⚠️ IT IS RIGHT BEHIND YOU!' : '⚠️ IT is close — run!'; beat = d < 6 ? 0.45 : 0.75; }
+        hot = Math.max(0, 1 - d / 25);
+      } else hot = 0.6;
+      if (left < 20) hot = Math.max(hot, 0.85);
+    } else if (this.mode === 'hotpotato') {
+      if (ms.popAt && !ms.intermissionUntil) hot = Math.max(0, Math.min(1, 1 - (ms.popAt - now) / 12000));
+      if (ms.holder >= 0 && ms.holder !== this.me && this.alive) {
+        const d = distTo(ms.holder);
+        if (d < 7) { warn = '🔥 The Boob-tato is coming for you!'; beat = 0.7; }
+      }
+    } else if (this.mode === 'grab') {
+      const it = ms.item || {};
+      if (it.carrier >= 0 && it.carrier !== this.me && ms.deliverStart) { warn = `⚠️ ${this.players.get(it.carrier)?.name || '?'} is delivering — stop them!`; hot = 1; }
+      else if (it.carrier === this.me) hot = ms.deliverStart ? 1 : 0.7;
+      else if (it.carrier >= 0) hot = 0.5;
+    } else if (this.combat && this.alive) {
+      const aliveN = [...this.players.values()].filter((p) => p.alive && !p.left).length;
+      hot = aliveN <= 2 ? 1 : aliveN <= 3 ? 0.7 : 0.25;
+      const hp = this.inv ? this.inv.hp : 100;
+      if (hp > 0 && hp <= 25) { beat = 0.85; if (!warn && hp <= 15) warn = '🩹 Low health — heal up!'; }
+    }
+    if (!this.alive) { warn = null; beat = 0; }
+    this.hud.warn(warn);
+    audio.setIntensity(hot);
+    if (beat) {
+      this.beatT = (this.beatT || 0) - dt;
+      if (this.beatT <= 0) { this.beatT = beat; audio.play('heartbeat', { v: 0.7 }); }
+    } else this.beatT = 0;
   }
 
   // markers for objectives (used by the HUD)
@@ -1120,6 +1180,9 @@ export class Game {
   // ------------------------------------------------------------------ teardown
   end() {
     this.ended = true;
+    audio.stopMatchMusic();
+    audio.setIntensity(0);
+    this.hud.warn(null);
     this.input.unlock();
     this.closePanel();
     this.hud.prompt(null);
@@ -1128,6 +1191,8 @@ export class Game {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    audio.stopMatchMusic();
+    audio.setIntensity(0);
     this.running = false;
     if (this.renderer) this.renderer.setAnimationLoop(null);
     for (const u of this.unsubs) u();

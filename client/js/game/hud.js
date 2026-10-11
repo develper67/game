@@ -6,6 +6,38 @@ import { keyName, settings } from '../settings.js';
 
 const WEAPON_ICON = { pistol: '🔫', revolver: '🔫', smg: '🔫', shotgun: '💥', rifle: '🎯', sniper: '🔭', blaster: '⚡' };
 
+// Styles for the combat-feedback layer (damage direction, elimination popups,
+// warnings). Kept here so the HUD module is self-contained.
+const FX_CSS = `
+.hx-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.hx-dmg { position: absolute; left: 50%; top: 50%; width: 220px; height: 220px; margin: -110px 0 0 -110px; animation: hx-fade 1.1s ease-out forwards; }
+.hx-dmg::before { content: ''; position: absolute; left: 50%; top: 0; width: 120px; height: 46px; margin-left: -60px;
+  border-radius: 50% 50% 0 0 / 100% 100% 0 0; border-top: 9px solid rgba(255, 60, 80, 0.85); filter: drop-shadow(0 0 8px rgba(255, 30, 60, 0.9)); }
+@keyframes hx-fade { 0% { opacity: 1; } 70% { opacity: 0.8; } 100% { opacity: 0; } }
+.hx-elim { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); text-align: center; font-weight: 700; white-space: nowrap;
+  animation: hx-pop 1.9s cubic-bezier(.2, 1.4, .4, 1) forwards; text-shadow: 0 3px 0 rgba(0,0,0,.45); }
+.hx-elim .t { font-size: 15px; letter-spacing: 3px; color: #ffd23f; }
+.hx-elim .n { font-size: 30px; color: #fff; }
+.hx-elim .n b { color: #ff4d6d; }
+.hx-elim .s { font-size: 20px; color: #4cc9f0; margin-top: 2px; }
+@keyframes hx-pop { 0% { opacity: 0; transform: translateX(-50%) scale(1.6); } 12% { opacity: 1; transform: translateX(-50%) scale(1); }
+  80% { opacity: 1; transform: translateX(-50%) translateY(0); } 100% { opacity: 0; transform: translateX(-50%) translateY(-18px); } }
+.hx-warn { position: absolute; left: 50%; top: 128px; transform: translateX(-50%); padding: 6px 16px; border-radius: 999px; font-weight: 700; font-size: 16px;
+  color: #fff; background: rgba(255, 45, 85, 0.85); box-shadow: 0 0 18px rgba(255, 45, 85, 0.6); animation: hx-pulse 0.7s ease-in-out infinite alternate; white-space: nowrap; }
+.hx-warn.hidden { display: none; }
+@keyframes hx-pulse { from { transform: translateX(-50%) scale(1); } to { transform: translateX(-50%) scale(1.07); } }
+.hx-place { position: absolute; left: 50%; top: 30%; transform: translateX(-50%); font-weight: 700; font-size: 22px; color: #fff; text-shadow: 0 3px 0 rgba(0,0,0,.5); animation: hx-fade 4s ease-in forwards; }
+`;
+let fxStyle = null;
+function ensureFxStyle() {
+  if (fxStyle && document.head.contains(fxStyle)) return;
+  fxStyle = document.createElement('style');
+  fxStyle.id = 'hud-fx-style';
+  fxStyle.textContent = FX_CSS;
+  document.head.appendChild(fxStyle);
+}
+const STREAK = ['', '', 'DOUBLE!', 'TRIPLE!', 'QUAD!', 'RAMPAGE!', 'UNSTOPPABLE!'];
+
 export class Hud {
   constructor(root, game) {
     this.game = game;
@@ -42,7 +74,11 @@ export class Hud {
     this.netEl = h('div', { class: 'netwarn hidden', text: 'Connection lost — reconnecting…' });
     this.scoreEl = h('div', { class: 'scoreboard hidden' });
     this.pickupFeed = h('div', { style: { position: 'absolute', right: '20px', bottom: '300px', display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-end' } });
-    this.root.append(this.vignette, this.markers, this.crosshair, this.hitmarkerEl, this.top, this.killfeed, this.vitals, this.livesEl, this.heals, this.hotbar,
+    ensureFxStyle();
+    this.fx = h('div', { class: 'hx-layer' });
+    this.warnEl = h('div', { class: 'hx-warn hidden' });
+    this.fx.appendChild(this.warnEl);
+    this.root.append(this.vignette, this.fx, this.markers, this.crosshair, this.hitmarkerEl, this.top, this.killfeed, this.vitals, this.livesEl, this.heals, this.hotbar,
       this.ammoEl, this.matsEl, this.promptEl, this.progressEl, this.countdownEl, this.centerEl, this.spectateEl, this.fpsEl, this.netEl, this.scoreEl, this.pickupFeed);
     this.markerEls = new Map();
     this.progress = null;
@@ -68,6 +104,40 @@ export class Hud {
     this.vignette.classList.add('hurt');
     clearTimeout(this._hurtT);
     this._hurtT = setTimeout(() => this.vignette.classList.remove('hurt'), 120);
+  }
+
+  // red arc around the crosshair pointing at whoever hit you (angle: 0 = ahead, + = right)
+  damageFrom(angle) {
+    const el = h('div', { class: 'hx-dmg', style: { transform: `rotate(${angle}rad)` } });
+    this.fx.appendChild(el);
+    while (this.fx.querySelectorAll('.hx-dmg').length > 4) this.fx.querySelector('.hx-dmg').remove();
+    setTimeout(() => el.remove(), 1150);
+  }
+
+  // big "ELIMINATED name" with a streak callout for multi-kills
+  elimPopup(name, head, streak) {
+    this.fx.querySelectorAll('.hx-elim').forEach((e) => e.remove());
+    const el = h('div', { class: 'hx-elim' },
+      h('div', { class: 't', text: head ? '🎯 HEADSHOT ELIMINATION' : '💀 ELIMINATED' }),
+      h('div', { class: 'n' }, h('b', { text: name })),
+      streak >= 2 ? h('div', { class: 's', text: STREAK[Math.min(streak, STREAK.length - 1)] }) : null);
+    this.fx.appendChild(el);
+    setTimeout(() => el.remove(), 2000);
+  }
+
+  // a pulsing warning pill under the mode status (null hides it)
+  warn(text) {
+    if (this.last.warn === text) return;
+    this.last.warn = text;
+    if (!text) { this.warnEl.classList.add('hidden'); return; }
+    this.warnEl.textContent = text;
+    this.warnEl.classList.remove('hidden');
+  }
+
+  placement(text) {
+    const el = h('div', { class: 'hx-place', text });
+    this.fx.appendChild(el);
+    setTimeout(() => el.remove(), 4100);
   }
 
   feed(node, ms = 6000) {

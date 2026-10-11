@@ -7,6 +7,8 @@ class AudioEngine {
     this.listener = { x: 0, y: 0, z: 0, yaw: 0 };
     this.musicOn = false;
     this.lastPlay = new Map();
+    this.env = { kind: 'outdoor', wet: 1 };
+    this.intensity = 0;
   }
 
   init() {
@@ -25,8 +27,35 @@ class AudioEngine {
     this.noise = c.createBuffer(1, len, c.sampleRate);
     const d = this.noise.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    // shared reverb bus: gunshots, pops and far-away sounds ring out through it
+    this.reverbIn = c.createGain();
+    this.reverb = c.createConvolver();
+    this.reverbOut = c.createGain();
+    this.reverbOut.gain.value = 0.6;
+    this.reverbIn.connect(this.reverb).connect(this.reverbOut).connect(this.sfxGain);
+    this.setEnvironment(this.env.kind);
     this.applyVolumes();
     onSettings(() => this.applyVolumes());
+  }
+
+  // generated stereo impulse response (no audio files)
+  impulse(seconds, decay) {
+    const c = this.ctx, rate = c.sampleRate, len = Math.floor(rate * seconds);
+    const buf = c.createBuffer(2, len, rate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = buf.getChannelData(ch);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+    }
+    return buf;
+  }
+
+  // indoor maps (the mall) ring longer; open maps get a short outdoor slap
+  setEnvironment(kind) {
+    this.env.kind = kind;
+    if (!this.ctx) return;
+    const indoor = kind === 'indoor';
+    this.reverb.buffer = this.impulse(indoor ? 2.4 : 1.4, indoor ? 2.4 : 3.4);
+    this.env.wet = indoor ? 1.8 : 1;
   }
 
   applyVolumes() {
@@ -39,15 +68,30 @@ class AudioEngine {
   setListener(x, y, z, yaw) { this.listener.x = x; this.listener.y = y; this.listener.z = z; this.listener.yaw = yaw; }
 
   // --- building blocks -----------------------------------------------------
-  out(vol, pan) {
+  // per-sound output: volume, distance muffling, stereo pan and a reverb send
+  out(vol, pan, o = {}) {
     const c = this.ctx;
     const g = c.createGain();
     g.gain.value = vol;
+    let node = g;
+    if (o.dist > 12) {
+      const f = c.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = Math.max(900, 16000 - o.dist * 240);
+      node.connect(f); node = f;
+    }
     if (pan !== undefined && c.createStereoPanner) {
       const p = c.createStereoPanner();
       p.pan.value = Math.max(-1, Math.min(1, pan));
-      g.connect(p).connect(this.sfxGain);
-    } else g.connect(this.sfxGain);
+      node.connect(p); node = p;
+    }
+    node.connect(this.sfxGain);
+    const wet = ((o.wet || 0) + Math.min(0.3, (o.dist || 0) / 150)) * this.env.wet;
+    if (wet > 0.01 && this.reverbIn) {
+      const send = c.createGain();
+      send.gain.value = Math.min(1, wet);
+      g.connect(send).connect(this.reverbIn);
+    }
     return g;
   }
 
@@ -83,7 +127,7 @@ class AudioEngine {
   }
 
   spatial(pos, maxDist = 60) {
-    if (!pos) return { vol: 1, pan: 0 };
+    if (!pos) return { vol: 1, pan: 0, dist: 0 };
     const L = this.listener;
     const dx = pos.x - L.x, dz = pos.z - L.z, dy = (pos.y || 0) - L.y;
     const dist = Math.hypot(dx, dy, dz);
@@ -91,7 +135,7 @@ class AudioEngine {
     // listener right vector for yaw (yaw 0 faces -Z): right = (cos yaw, -sin yaw)
     const rx = Math.cos(L.yaw), rz = -Math.sin(L.yaw);
     const pan = dist > 0.5 ? (dx * rx + dz * rz) / dist : 0;
-    return { vol: att * att, pan: pan * 0.8 };
+    return { vol: att * att, pan: pan * 0.8, dist };
   }
 
   // --- public ----------------------------------------------------------------
@@ -108,7 +152,7 @@ class AudioEngine {
     const sp = this.spatial(opts.pos, opts.maxDist || 70);
     const vol = (opts.vol ?? 1) * sp.vol;
     if (vol < 0.01) return;
-    const dest = this.out(vol, sp.pan);
+    const dest = this.out(vol, sp.pan, { dist: sp.dist, wet: WET[name] });
     try { fn(this, dest, this.ctx.currentTime + 0.005, opts); } catch (e) { /* ignore audio glitches */ }
   }
 
@@ -149,16 +193,78 @@ class AudioEngine {
   stopMusic() {
     this.musicOn = false;
     clearTimeout(this.musicTimer);
+    this.stopMatchMusic();
   }
+
+  // --- match music: a light procedural groove per mode -------------------------
+  // intensity (0..1) brings in the hats, snare and lead when things get tense
+  startMatchMusic(mode) {
+    if (!this.ctx) return;
+    this.stopMatchMusic();
+    const st = MATCH_STYLE[mode] || MATCH_STYLE.tag;
+    const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
+    const step = 60 / st.bpm / 4; // 16th notes
+    let i = 0;
+    let next = this.ctx.currentTime + 0.15;
+    const bus = this.ctx.createGain();
+    bus.gain.value = 0.55;
+    bus.connect(this.musicGain);
+    this.matchBus = bus;
+    const tick = () => {
+      if (this.matchBus !== bus) return;
+      const c = this.ctx;
+      while (next < c.currentTime + 0.25) {
+        const t = next, s16 = i % 16, bar = Math.floor(i / 16);
+        const root = st.roots[bar % st.roots.length];
+        const hot = this.intensity;
+        if (st.kick.includes(s16)) { this.osc(bus, 'sine', 140, 42, t, 0.16, 0.55); }
+        if (s16 === 4 || s16 === 12) { if (hot > 0.3 || st.snare) this.noiseBurst(bus, t, 0.12, 0.16 + hot * 0.12, 'bandpass', 1800, 900, 0.7); }
+        if (s16 % 2 === 0 && (hot > 0.15 || st.hats)) this.noiseBurst(bus, t, 0.03, 0.06 + hot * 0.05, 'highpass', 7000);
+        if (st.bass.includes(s16)) this.osc(bus, st.bassWave, midi(root - 24), null, t, step * 1.8, 0.16, 0.01);
+        const n = st.lead[i % st.lead.length];
+        if (n !== null && (hot > 0.5 || st.leadAlways) && s16 % 2 === 0) this.osc(bus, 'triangle', midi(root + n), null, t, step * 1.6, 0.035 + hot * 0.025, 0.01);
+        if (st.tick && s16 % 4 === 0) this.osc(bus, 'square', 2200, null, t, 0.015, 0.03 + hot * 0.05);
+        next += step;
+        i++;
+      }
+      this.matchTimer = setTimeout(tick, 80);
+    };
+    tick();
+  }
+
+  stopMatchMusic() {
+    clearTimeout(this.matchTimer);
+    if (this.matchBus) {
+      const b = this.matchBus;
+      this.matchBus = null;
+      try { b.gain.setTargetAtTime(0.0001, this.ctx.currentTime, 0.3); setTimeout(() => b.disconnect(), 1500); } catch { /* ignore */ }
+    }
+  }
+
+  setIntensity(x) { this.intensity = Math.max(0, Math.min(1, x)); }
 }
 
+// per-mode groove: tempo, kick pattern (16ths), bass hits, root notes per bar, lead motif
+const MATCH_STYLE = {
+  tag: { bpm: 128, kick: [0, 6, 8, 14], bass: [0, 3, 8, 11], roots: [60, 60, 65, 67], lead: [12, null, 7, null, 9, null, 7, 4], bassWave: 'triangle', hats: true },
+  hotpotato: { bpm: 118, kick: [0, 8], bass: [0, 6, 8], roots: [57, 57, 53, 55], lead: [12, 11, 12, null, 7, null, 8, null], bassWave: 'square', tick: true },
+  grab: { bpm: 124, kick: [0, 4, 8, 12], bass: [0, 7, 10], roots: [62, 62, 67, 69], lead: [7, 9, 12, null, 14, 12, 9, null], bassWave: 'triangle', hats: true },
+  guns: { bpm: 96, kick: [0, 10], bass: [0, 3], roots: [57, 57, 55, 53], lead: [12, null, null, 15, null, null, 14, null], bassWave: 'sawtooth' },
+  craft: { bpm: 92, kick: [0, 10], bass: [0, 7], roots: [55, 55, 58, 53], lead: [12, null, 10, null, 7, null, 10, null], bassWave: 'sawtooth' },
+};
+
+// how much of each sound goes to the reverb (echo)
+const WET = { shot: 0.35, pop: 0.6, boing: 0.15, punch: 0.1, door: 0.25, elim: 0.2, win: 0.3, tagged: 0.15, squeak: 0.15, heartbeat: 0 };
+
+// layered gunshots: crack (transient) + body + low punch + tail, and the action
+// sound (pump, bolt, hammer) for your own gun
 const GUN = {
-  pistol: { dur: 0.16, f: 3200, thump: 150, vol: 0.55 },
-  revolver: { dur: 0.28, f: 2400, thump: 110, vol: 0.75 },
-  smg: { dur: 0.09, f: 3800, thump: 170, vol: 0.4 },
-  shotgun: { dur: 0.38, f: 1700, thump: 90, vol: 0.9 },
-  rifle: { dur: 0.13, f: 2600, thump: 130, vol: 0.55 },
-  sniper: { dur: 0.6, f: 2200, thump: 80, vol: 0.95 },
+  pistol: { crack: 4200, body: 1500, dur: 0.12, thump: 160, vol: 0.6 },
+  revolver: { crack: 3600, body: 1100, dur: 0.22, thump: 110, vol: 0.8, mech: 'hammer' },
+  smg: { crack: 5200, body: 1900, dur: 0.07, thump: 190, vol: 0.42 },
+  shotgun: { crack: 2600, body: 750, dur: 0.32, thump: 85, vol: 0.95, mech: 'pump' },
+  rifle: { crack: 3900, body: 1300, dur: 0.11, thump: 135, vol: 0.62 },
+  sniper: { crack: 3000, body: 900, dur: 0.42, thump: 70, vol: 1.0, mech: 'bolt' },
 };
 
 const SOUNDS = {
@@ -194,15 +300,31 @@ const SOUNDS = {
   harvest: (a, d, t) => { a.noiseBurst(d, t, 0.1, 0.4, 'lowpass', 1200); a.osc(d, 'sine', 300, 200, t, 0.1, 0.3); },
   shot: (a, d, t, o) => {
     if (o.w === 'blaster') {
-      a.osc(d, 'sawtooth', 1400, 180, t, 0.18, 0.45);
+      a.osc(d, 'sawtooth', 1600, 160, t, 0.2, 0.45);
       a.osc(d, 'square', 900, 120, t, 0.15, 0.2);
+      a.osc(d, 'sine', 220, 60, t, 0.22, 0.5);
+      a.noiseBurst(d, t, 0.12, 0.2, 'highpass', 6000);
       return;
     }
     const g = GUN[o.w] || GUN.pistol;
-    a.noiseBurst(d, t, g.dur, g.vol, 'lowpass', g.f, 300);
-    a.noiseBurst(d, t, 0.03, g.vol * 0.8, 'highpass', 3000);
-    a.osc(d, 'sine', g.thump, 35, t, g.dur * 0.9, g.vol);
+    a.noiseBurst(d, t, 0.025, g.vol, 'highpass', g.crack);
+    a.noiseBurst(d, t, g.dur, g.vol * 0.9, 'bandpass', g.body * 1.6, g.body * 0.45, 0.9);
+    a.osc(d, 'sine', g.thump * 1.8, g.thump * 0.4, t, g.dur + 0.06, g.vol);
+    a.noiseBurst(d, t + 0.015, g.dur * 2.4, g.vol * 0.3, 'lowpass', 900, 140);
+    if (!o.pos) {
+      const click = (dt, f, v = 0.3) => a.noiseBurst(d, t + dt, 0.045, v, 'bandpass', f, null, 3);
+      if (g.mech === 'pump') { click(0.32, 1500, 0.35); click(0.46, 1000, 0.4); }
+      if (g.mech === 'bolt') { click(0.55, 2200); click(0.7, 1400, 0.35); click(0.86, 2600, 0.25); }
+      if (g.mech === 'hammer') click(0.24, 3200, 0.2);
+    }
   },
+  heartbeat: (a, d, t, o) => {
+    const v = o.v ?? 0.6;
+    a.osc(d, 'sine', 70, 45, t, 0.14, v);
+    a.osc(d, 'sine', 64, 40, t + 0.2, 0.16, v * 0.75);
+  },
+  warn: (a, d, t) => { a.osc(d, 'square', 880, null, t, 0.06, 0.12); a.osc(d, 'square', 880, null, t + 0.12, 0.06, 0.12); },
+  streak: (a, d, t, o) => { const n = Math.min(5, o.n || 2); for (let i = 0; i < n; i++) a.osc(d, 'triangle', 660 * Math.pow(1.122, i * 2), null, t + i * 0.07, 0.18, 0.3); },
   reload: (a, d, t, o) => {
     const ms = (o.ms || 1500) / 1000;
     a.noiseBurst(d, t + 0.05, 0.05, 0.4, 'bandpass', 4000, null, 3);
