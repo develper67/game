@@ -3,6 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 import express from 'express';
 import compression from 'compression';
 import { Server } from 'socket.io';
@@ -110,7 +111,10 @@ export async function startServer(opts = {}) {
     });
   });
 
-  await new Promise((resolve) => server.listen(port, host, resolve));
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, host, () => { server.off('error', reject); resolve(); });
+  });
   const actualPort = server.address().port;
   if (!opts.quiet) printBanner(actualPort);
 
@@ -143,10 +147,28 @@ function printBanner(port) {
   console.log('  (Internet play needs port forwarding or a tunnel — see README.)\n');
 }
 
+// Used by start-yoink.bat / start-yoink.sh so players don't have to type the URL.
+function openBrowser(url) {
+  const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url]]
+    : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  try {
+    const child = spawn(cmd, args, { stdio: 'ignore', detached: true, windowsVerbatimArguments: true });
+    child.on('error', () => console.log(`  Open ${url} in your browser to play.`));
+    child.unref();
+  } catch { console.log(`  Open ${url} in your browser to play.`); }
+}
+
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
-  startServer({ dev: process.env.NODE_ENV !== 'production' }).catch((e) => {
-    console.error(e);
+  startServer({ dev: process.env.NODE_ENV !== 'production' }).then(({ port }) => {
+    if (process.env.YOINK_OPEN === '1') openBrowser(`http://localhost:${port}`);
+  }).catch((e) => {
+    if (e && e.code === 'EADDRINUSE') {
+      const port = +process.env.PORT || 3000;
+      console.error(`\n  Port ${port} is already in use - yoink! may already be running.`);
+      console.error(`  Open http://localhost:${port} in your browser, or set the PORT environment variable to use another port.\n`);
+      if (process.env.YOINK_OPEN === '1') openBrowser(`http://localhost:${port}`);
+    } else console.error(e);
     process.exit(1);
   });
 }

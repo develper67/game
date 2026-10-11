@@ -10,12 +10,18 @@ Five game modes, seven maps with real explorable buildings, map voting, bots for
 
 Requirements: **Node.js 18.17 or newer** (tested on Node 22) and a modern desktop browser with WebGL (Chrome, Edge or Firefox).
 
+**Windows:** double-click **`start-yoink.bat`**. It installs the dependencies the first time, starts the server and opens the game in your browser. Keep that window open while you play.
+
+**Any OS, from a terminal:**
+
 ```bash
 npm install
 npm start
 ```
 
-Then open **http://localhost:3000**, create an account and play. The server prints your LAN address too, for example `http://192.168.1.20:3000`.
+Then open **http://localhost:3000**, create an account and play. The server prints your LAN address too, for example `http://192.168.1.20:3000`. (`./start-yoink.sh` does the same on macOS/Linux and opens the browser for you.)
+
+> **Don't open `client/index.html` directly** (a `file://` page). The game, accounts and multiplayer are served by the yoink! server, so the page only works at `http://localhost:3000` while the server is running. Opened as a file it just shows these instructions.
 
 * An account is required for everything, including practice against bots.
 * Data is saved in `data/yoink.db` (SQLite, written atomically). Delete that file to reset all accounts.
@@ -55,6 +61,7 @@ Everyone connects to the same server address. Each friend makes their own accoun
 | `HOST` | `0.0.0.0` | Interface to listen on (`127.0.0.1` = this PC only) |
 | `YOINK_DB` | `data/yoink.db` | SQLite database file |
 | `TRUST_PROXY` | unset | Set to `1` when running behind a reverse proxy/tunnel that sets `X-Forwarded-For` |
+| `YOINK_OPEN` | unset | Set to `1` to open the game in your browser once the server starts (the launchers do this) |
 
 ---
 
@@ -185,6 +192,8 @@ client/            the browser game (ES modules, no build step)
   js/ui/           auth, menu tabs, vote, loading, results, settings, chat panel
   assets/previews/ map thumbnails for the vote screen
 tests/  tools/
+start-yoink.bat    Windows launcher (install once, start server, open browser)
+start-yoink.sh     same for macOS/Linux
 ```
 
 ### How multiplayer works

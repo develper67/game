@@ -17,16 +17,76 @@
       }
     }
   </script>
+  <!-- Inline styles so this screen also works when the page is opened as a file (no server). -->
+  <style>
+    #boot { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 24px;
+      background: linear-gradient(160deg, #22124a, #140b2b); color: #fff7fb; font-family: 'Fredoka', 'Trebuchet MS', 'Segoe UI', sans-serif; }
+    #boot .box { max-width: 640px; width: 100%; background: rgba(32, 18, 72, 0.9); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 22px; padding: 28px 32px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45); }
+    #boot h1 { margin: 0 0 6px; font-size: 56px; letter-spacing: -1px; transform: rotate(-3deg); display: inline-block; text-shadow: 0 5px 0 #ff4d6d; }
+    #boot h1 span { color: #ffd23f; }
+    #boot p { color: #d9ccff; font-size: 17px; line-height: 1.45; margin: 10px 0; }
+    #boot ol { color: #fff; font-size: 17px; line-height: 1.6; padding-left: 22px; }
+    #boot code { background: rgba(0, 0, 0, 0.35); padding: 2px 8px; border-radius: 6px; color: #ffd23f; font-size: 15px; }
+    #boot .err { color: #ff8fa3; font-family: Consolas, monospace; font-size: 13px; white-space: pre-wrap; background: rgba(0, 0, 0, 0.3); padding: 10px; border-radius: 10px; margin-top: 12px; max-height: 180px; overflow: auto; }
+    #boot .spin { display: inline-block; width: 22px; height: 22px; border: 3px solid rgba(255, 255, 255, 0.25); border-top-color: #fff; border-radius: 50%; animation: bootspin 0.8s linear infinite; vertical-align: middle; margin-right: 10px; }
+    @keyframes bootspin { to { transform: rotate(360deg); } }
+  </style>
 </head>
 <body>
-  <div id="app">
-    <noscript>yoink! needs JavaScript to run.</noscript>
+  <div id="boot">
+    <div class="box">
+      <h1>yoink<span>!</span></h1>
+      <div id="boot-body"><p><span class="spin"></span>Loading the game…</p></div>
+    </div>
   </div>
+  <noscript><p style="color:#fff;font-family:sans-serif;padding:20px">yoink! needs JavaScript to run.</p></noscript>
+  <div id="app"></div>
   <div id="game-root" class="hidden"></div>
   <div id="overlay-root"></div>
   <div id="toast-root"></div>
   <div id="invite-root"></div>
   <div id="modal-root"></div>
+  <script>
+    // Boot guard: never leave a blank white page. Shows how to start the game if
+    // the page was opened without the server, or the error if startup failed.
+    (function () {
+      var body = document.getElementById('boot-body');
+      function el(tag, text, cls) { var e = document.createElement(tag); if (text) e.textContent = text; if (cls) e.className = cls; return e; }
+      function instructions(title) {
+        while (body.firstChild) body.removeChild(body.firstChild);
+        body.appendChild(el('p', title));
+        var ol = el('ol');
+        ol.appendChild(el('li', 'Install Node.js 18 or newer from nodejs.org (LTS version).'));
+        var li2 = el('li'); li2.appendChild(document.createTextNode('In the yoink folder double-click ')); li2.appendChild(el('code', 'start-yoink.bat')); li2.appendChild(document.createTextNode(' (Windows) or run ')); li2.appendChild(el('code', 'npm install')); li2.appendChild(document.createTextNode(' then ')); li2.appendChild(el('code', 'npm start')); li2.appendChild(document.createTextNode(' in a terminal.')); ol.appendChild(li2);
+        var li3 = el('li'); li3.appendChild(document.createTextNode('Open ')); li3.appendChild(el('code', 'http://localhost:3000')); li3.appendChild(document.createTextNode(' in Chrome or Edge.')); ol.appendChild(li3);
+        body.appendChild(ol);
+        body.appendChild(el('p', "Don't double-click index.html: the game is served by its own server so that multiplayer, accounts and 3D graphics can load."));
+      }
+      window.__yoinkBootError = function (msg) {
+        if (window.__yoinkBooted) return;
+        instructions('yoink! could not start.');
+        if (msg) body.appendChild(el('div', String(msg), 'err'));
+      };
+      if (location.protocol === 'file:') {
+        instructions('This page was opened directly from a file, but yoink! runs through its own server.');
+        return;
+      }
+      window.addEventListener('error', function (e) {
+        if (window.__yoinkBooted) return;
+        var t = e && e.target;
+        // Only the game's own scripts are fatal; a missing web font or image is not.
+        if (t && t !== window) {
+          if (t.tagName === 'SCRIPT' && t.src) window.__yoinkBootError('Failed to load ' + t.src);
+          return;
+        }
+        window.__yoinkBootError((e.error && e.error.stack) || e.message || 'Unknown error');
+      }, true);
+      window.addEventListener('unhandledrejection', function (e) { window.__yoinkBootError(e.reason && (e.reason.stack || e.reason.message || e.reason)); });
+      setTimeout(function () {
+        if (!window.__yoinkBooted) window.__yoinkBootError('The game did not finish loading. Make sure the yoink! server is running (npm start) and that you opened http://localhost:3000. Use a recent Chrome, Edge or Firefox.');
+      }, 15000);
+    })();
+  </script>
   <script src="/socket.io/socket.io.js"></script>
   <script type="module" src="/js/main.js"></script>
 </body>

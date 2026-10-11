@@ -197,6 +197,10 @@ class App {
   showProfile(username) { this.social.showProfile(username); }
 }
 
+// every module loaded: hand over from the boot screen in index.html
+window.__yoinkBooted = true;
+document.getElementById('boot')?.remove();
+
 const previewMap = new URLSearchParams(location.search).get('preview');
 if (previewMap) {
   // tools/render-previews.mjs uses this to capture map thumbnails
