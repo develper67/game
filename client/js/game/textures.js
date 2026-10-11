@@ -1,9 +1,24 @@
-// Procedural canvas textures (grayscale detail maps tinted by vertex colors).
+// Procedural canvas textures. World textures are light grayscale detail maps
+// (mean ~240) that get multiplied by per-vertex colors, so one texture serves
+// every tint and colors stay true instead of going muddy. All patterns tile.
 import * as THREE from 'three';
 
 const cache = new Map();
-let SIZE = 256;
-export function setTextureSize(s) { SIZE = s; cache.clear(); }
+let SIZE = 256; // texture resolution in pixels
+let ANISO = 4;
+const D = 256; // design units: generators draw in a 256x256 space
+
+// Kept for older callers: the resolution now follows setTextureQuality().
+export function setTextureSize() {}
+
+// Resolution + anisotropic filtering per graphics quality
+export function setTextureQuality(q, renderer) {
+  const max = renderer ? renderer.capabilities.getMaxAnisotropy() : 4;
+  ANISO = Math.min(max, q === 'high' ? 8 : q === 'medium' ? 4 : 2);
+  const size = q === 'high' ? 512 : 256;
+  if (size !== SIZE) { SIZE = size; cache.clear(); }
+  for (const t of cache.values()) if (t.isTexture && t.wrapS === THREE.RepeatWrapping && t.anisotropy !== ANISO) { t.anisotropy = ANISO; t.needsUpdate = true; }
+}
 
 function rng(seed) {
   let a = seed >>> 0;
@@ -22,6 +37,7 @@ function canvas(size = SIZE) {
   return c;
 }
 
+// per-pixel monochrome noise over the whole canvas (s = pixel size)
 function noise(ctx, s, amount, seed, base = 200, alpha = 1) {
   const img = ctx.getImageData(0, 0, s, s);
   const r = rng(seed);
@@ -35,221 +51,444 @@ function noise(ctx, s, amount, seed, base = 200, alpha = 1) {
   }
   ctx.putImageData(img, 0, 0);
 }
+const grain = (ctx, amount, seed) => noise(ctx, ctx.canvas.width, amount, seed);
+
+const g = (v, a = 1) => `rgba(${v | 0},${v | 0},${v | 0},${a})`;
 
 function fill(ctx, s, v) {
-  ctx.fillStyle = typeof v === 'number' ? `rgb(${v},${v},${v})` : v;
+  ctx.fillStyle = typeof v === 'number' ? g(v) : v;
   ctx.fillRect(0, 0, s, s);
 }
 
-function blotches(ctx, s, n, seed, rMin, rMax, light, dark) {
-  const r = rng(seed);
+// run fn at (x,y) and at the wrapped copies that overlap the tile
+function wrap(x, y, r, fn) {
+  for (const dx of [-D, 0, D]) for (const dy of [-D, 0, D]) {
+    const px = x + dx, py = y + dy;
+    if (px > -r && px < D + r && py > -r && py < D + r) fn(px, py);
+  }
+}
+
+// soft round stains
+function blotches(ctx, n, r, rMin, rMax, light, dark, aMin = 0.05, aMax = 0.12) {
   for (let i = 0; i < n; i++) {
-    const v = r() < 0.5 ? light : dark;
-    ctx.fillStyle = `rgba(${v},${v},${v},${0.08 + r() * 0.12})`;
-    ctx.beginPath();
-    ctx.arc(r() * s, r() * s, rMin + r() * (rMax - rMin), 0, Math.PI * 2);
-    ctx.fill();
+    const v = r() < 0.5 ? light : dark, a = aMin + r() * (aMax - aMin);
+    const rad = rMin + r() * (rMax - rMin);
+    wrap(r() * D, r() * D, rad, (x, y) => {
+      const gr = ctx.createRadialGradient(x, y, 0, x, y, rad);
+      gr.addColorStop(0, g(v, a)); gr.addColorStop(1, g(v, 0));
+      ctx.fillStyle = gr;
+      ctx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+    });
+  }
+}
+
+// tiny dots
+function specks(ctx, n, r, rMin, rMax, v, a, v2 = v) {
+  for (let i = 0; i < n; i++) {
+    ctx.fillStyle = g(r() < 0.5 ? v : v2, a);
+    const rad = rMin + r() * (rMax - rMin);
+    wrap(r() * D, r() * D, rad, (x, y) => { ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.fill(); });
+  }
+}
+
+// chunky bevelled block: lit top/left edge, shaded bottom/right edge
+function bevel(ctx, x, y, w, h, v, hi = 16, lo = 30, e = 2.5, rad = 0) {
+  ctx.fillStyle = g(v);
+  if (rad) { ctx.beginPath(); ctx.roundRect(x, y, w, h, rad); ctx.fill(); } else ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = g(Math.min(255, v + hi), 0.9);
+  ctx.fillRect(x + rad * 0.5, y, w - rad, e);
+  ctx.fillStyle = g(Math.min(255, v + hi * 0.5), 0.6);
+  ctx.fillRect(x, y + rad * 0.5, e, h - rad);
+  ctx.fillStyle = g(Math.max(0, v - lo), 0.9);
+  ctx.fillRect(x + rad * 0.5, y + h - e, w - rad, e);
+  ctx.fillStyle = g(Math.max(0, v - lo * 0.6), 0.6);
+  ctx.fillRect(x + w - e, y + rad * 0.5, e, h - rad);
+}
+
+function hline(ctx, y, v, a, w = 1.5) { ctx.fillStyle = g(v, a); ctx.fillRect(0, y, D, w); }
+function vline(ctx, x, v, a, w = 1.5) { ctx.fillStyle = g(v, a); ctx.fillRect(x, 0, w, D); }
+
+// wavy grain lines across the tile
+function grainLines(ctx, r, n, y0, y1, v, aMax, amp = 3) {
+  ctx.lineWidth = 1;
+  for (let i = 0; i < n; i++) {
+    const y = y0 + r() * (y1 - y0);
+    ctx.strokeStyle = g(v, 0.03 + r() * aMax);
+    ctx.beginPath(); ctx.moveTo(-4, y);
+    ctx.bezierCurveTo(D * 0.33, y + (r() - 0.5) * amp * 2, D * 0.66, y + (r() - 0.5) * amp * 2, D + 4, y);
+    ctx.stroke();
+  }
+}
+
+// random branching cracks
+function cracks(ctx, r, n, v, a, w = 1.2, len = 5) {
+  ctx.lineWidth = w; ctx.strokeStyle = g(v, a); ctx.lineCap = 'round';
+  for (let i = 0; i < n; i++) {
+    let x = r() * D, y = r() * D, ang = r() * Math.PI * 2;
+    ctx.beginPath(); ctx.moveTo(x, y);
+    for (let k = 0; k < len; k++) {
+      ang += (r() - 0.5) * 1.4; const l = 6 + r() * 16;
+      x += Math.cos(ang) * l; y += Math.sin(ang) * l; ctx.lineTo(x, y);
+    }
+    ctx.stroke();
   }
 }
 
 const GEN = {
-  plaster(ctx, s) { fill(ctx, s, 238); blotches(ctx, s, 40, 3, 10, 40, 255, 200); noise(ctx, s, 18, 1); },
-  concrete(ctx, s) {
-    fill(ctx, s, 215); blotches(ctx, s, 60, 5, 6, 30, 240, 170); noise(ctx, s, 26, 2);
-    ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 2; ctx.strokeRect(1, 1, s - 2, s - 2);
+  plaster(c, r) { fill(c, D, 244); blotches(c, 26, r, 20, 70, 255, 214); specks(c, 220, r, 0.5, 1.2, 205, 0.25); grain(c, 7, 1); },
+  stucco(c, r) { fill(c, D, 240); blotches(c, 20, r, 15, 50, 255, 210); specks(c, 1400, r, 0.4, 1.3, 205, 0.35, 255); grain(c, 16, 2); },
+  concrete(c, r) {
+    fill(c, D, 236); blotches(c, 34, r, 10, 46, 255, 196, 0.05, 0.14); specks(c, 260, r, 0.6, 1.6, 180, 0.3);
+    grain(c, 12, 3);
+    // formwork seams + tie holes
+    hline(c, 0, 190, 0.7, 2); hline(c, 2, 255, 0.5, 1); vline(c, 0, 196, 0.6, 2);
+    for (const [x, y] of [[32, 32], [160, 32], [32, 160], [160, 160]]) { c.fillStyle = g(170, 0.6); c.beginPath(); c.arc(x, y, 2.4, 0, 7); c.fill(); }
   },
-  brick(ctx, s) {
-    fill(ctx, s, 200);
-    const rows = 8, h = s / rows, w = s / 4;
-    const r = rng(9);
+  brick(c, r) {
+    fill(c, D, 178);
+    const h = 32, w = 64;
+    for (let y = 0; y < 8; y++) for (let x = -1; x < 5; x++) {
+      let v = 214 + r() * 34; if (r() < 0.1) v -= 26;
+      bevel(c, x * w + (y % 2) * 32 + 2.5, y * h + 2.5, w - 5, h - 5, v, 18, 34, 2.5, 2);
+    }
+    specks(c, 300, r, 0.6, 1.4, 160, 0.3);
+    grain(c, 12, 4);
+  },
+  planks(c, r) {
+    fill(c, D, 140);
+    const n = 6, h = D / n;
+    for (let i = 0; i < n; i++) {
+      const v = 216 + r() * 30;
+      c.fillStyle = g(v); c.fillRect(0, i * h + 1.5, D, h - 3);
+      grainLines(c, r, 7, i * h + 3, i * h + h - 3, 120, 0.09, 2);
+      hline(c, i * h + 1.5, 255, 0.35, 1.5);
+      for (let k = 0; k < 2; k++) { const x = r() * D; c.fillStyle = g(130, 0.85); c.fillRect(x, i * h, 2.5, h); c.fillStyle = g(255, 0.3); c.fillRect(x + 2.5, i * h, 1, h); }
+    }
+    grain(c, 9, 5);
+  },
+  siding(c, r) {
+    const n = 8, h = D / n;
+    for (let i = 0; i < n; i++) {
+      const v = 236 + r() * 14;
+      const gr = c.createLinearGradient(0, i * h, 0, i * h + h);
+      gr.addColorStop(0, g(v - 52)); gr.addColorStop(0.16, g(v - 14)); gr.addColorStop(0.5, g(v)); gr.addColorStop(1, g(v + 6));
+      c.fillStyle = gr; c.fillRect(0, i * h, D, h);
+      hline(c, i * h + h - 1.5, 150, 0.7, 1.5);
+      grainLines(c, r, 3, i * h + 6, i * h + h - 3, 150, 0.05, 1);
+    }
+    grain(c, 7, 6);
+  },
+  wood(c, r) {
+    fill(c, D, 228);
+    grainLines(c, r, 46, 0, D, 110, 0.1, 5);
+    for (let i = 0; i < 3; i++) {
+      const x = r() * D, y = r() * D;
+      wrap(x, y, 12, (px, py) => { c.strokeStyle = g(120, 0.25); c.lineWidth = 1.2; for (let k = 1; k < 4; k++) { c.beginPath(); c.ellipse(px, py, k * 3.5, k * 1.6, 0, 0, 7); c.stroke(); } });
+    }
+    grain(c, 8, 7);
+  },
+  logs(c, r) {
+    const n = 5, h = D / n;
+    for (let i = 0; i < n; i++) {
+      const gr = c.createLinearGradient(0, i * h, 0, i * h + h);
+      gr.addColorStop(0, g(96)); gr.addColorStop(0.1, g(190)); gr.addColorStop(0.36, g(250)); gr.addColorStop(0.7, g(222)); gr.addColorStop(0.92, g(160)); gr.addColorStop(1, g(92));
+      c.fillStyle = gr; c.fillRect(0, i * h, D, h);
+      grainLines(c, r, 8, i * h + 5, i * h + h - 5, 110, 0.1, 2);
+      for (let k = 0; k < 2; k++) { const x = r() * D, y = i * h + h * (0.3 + r() * 0.4); wrap(x, y, 6, (px, py) => { c.fillStyle = g(130, 0.35); c.beginPath(); c.ellipse(px, py, 5, 2.5, 0, 0, 7); c.fill(); }); }
+    }
+    grain(c, 9, 8);
+  },
+  metal(c, r) {
+    fill(c, D, 228);
+    for (let y = 0; y < D; y += 1) { c.fillStyle = g(r() < 0.5 ? 255 : 196, 0.05 + r() * 0.05); c.fillRect(0, y, D, 1); }
+    blotches(c, 10, r, 20, 60, 255, 205, 0.04, 0.1);
+    hline(c, 0, 150, 0.7, 2); hline(c, 2, 255, 0.5, 1.5); vline(c, 0, 165, 0.6, 2); vline(c, 2, 255, 0.4, 1);
+    for (let x = 16; x < D; x += 32) { c.fillStyle = g(255, 0.8); c.beginPath(); c.arc(x - 0.6, 8.4, 2.2, 0, 7); c.fill(); c.fillStyle = g(150, 0.7); c.beginPath(); c.arc(x + 0.6, 9.6, 2.2, 0, 7); c.fill(); c.fillStyle = g(225); c.beginPath(); c.arc(x, 9, 1.8, 0, 7); c.fill(); }
+    grain(c, 6, 9);
+  },
+  metalfloor(c, r) {
+    fill(c, D, 206);
+    const s = 32;
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      const cx = x * s + s / 2, cy = y * s + s / 2, a = (x + y) % 2 ? 0.75 : -0.75;
+      c.save(); c.translate(cx, cy); c.rotate(a);
+      c.fillStyle = g(130, 0.55); c.beginPath(); c.roundRect(-9 + 1.2, -2.6 + 1.2, 18, 5.2, 2.6); c.fill();
+      c.fillStyle = g(250, 0.9); c.beginPath(); c.roundRect(-9, -2.6, 18, 5.2, 2.6); c.fill();
+      c.fillStyle = g(222); c.beginPath(); c.roundRect(-8, -1.4, 16.4, 3.4, 1.8); c.fill();
+      c.restore();
+    }
+    blotches(c, 12, r, 20, 60, 255, 170, 0.04, 0.1);
+    grain(c, 10, 10);
+  },
+  corrugated(c, r) {
+    const n = 16, w = D / n;
+    for (let i = 0; i < n; i++) {
+      const gr = c.createLinearGradient(i * w, 0, i * w + w, 0);
+      gr.addColorStop(0, g(170)); gr.addColorStop(0.28, g(238)); gr.addColorStop(0.5, g(254)); gr.addColorStop(0.78, g(216)); gr.addColorStop(1, g(170));
+      c.fillStyle = gr; c.fillRect(i * w, 0, w, D);
+    }
+    // weathering streaks running down from the top
+    for (let i = 0; i < 16; i++) {
+      const x = r() * D, len = 40 + r() * 160, wd = 3 + r() * 8;
+      const gr = c.createLinearGradient(0, 0, 0, len);
+      gr.addColorStop(0, g(120, 0.14)); gr.addColorStop(1, g(120, 0));
+      c.fillStyle = gr; c.fillRect(x, 0, wd, len);
+    }
+    hline(c, D - 2, 140, 0.6, 2);
+    grain(c, 7, 11);
+  },
+  container(c, r) {
+    const n = 10, w = D / n;
+    for (let i = 0; i < n; i++) {
+      const x = i * w;
+      c.fillStyle = g(244); c.fillRect(x, 0, w * 0.42, D);
+      c.fillStyle = g(198); c.fillRect(x + w * 0.42, 0, w * 0.1, D);
+      c.fillStyle = g(222); c.fillRect(x + w * 0.52, 0, w * 0.38, D);
+      c.fillStyle = g(252); c.fillRect(x + w * 0.9, 0, w * 0.1, D);
+    }
+    blotches(c, 20, r, 8, 30, 120, 120, 0.04, 0.1);
+    for (let i = 0; i < 10; i++) { const x = r() * D, len = 30 + r() * 120; const gr = c.createLinearGradient(0, D - len, 0, D); gr.addColorStop(0, g(110, 0)); gr.addColorStop(1, g(110, 0.16)); c.fillStyle = gr; c.fillRect(x, D - len, 4 + r() * 6, len); }
+    grain(c, 8, 12);
+  },
+  roof(c, r) {
+    // shingles: rows run along u, the exposed edge is at the bottom of each row
+    fill(c, D, 120);
+    const rows = 8, h = D / rows, w = 32;
+    for (let y = 0; y < rows; y++) for (let x = -1; x < 9; x++) {
+      const v = 212 + r() * 36, px = x * w + (y % 2) * 16 + (r() - 0.5) * 3, py = y * h;
+      const gr = c.createLinearGradient(0, py, 0, py + h);
+      gr.addColorStop(0, g(v - 34)); gr.addColorStop(0.35, g(v)); gr.addColorStop(1, g(v + 8));
+      c.fillStyle = gr; c.beginPath(); c.roundRect(px + 1.2, py, w - 2.4, h - 2, [0, 0, 6, 6]); c.fill();
+      c.fillStyle = g(255, 0.35); c.fillRect(px + 3, py + h - 5, w - 6, 1.5);
+    }
+    grain(c, 10, 13);
+  },
+  rooftile(c, r) {
+    const cols = 8, rows = 4, w = D / cols, h = D / rows;
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+      const v = 214 + r() * 34, px = x * w, py = y * h;
+      const gr = c.createLinearGradient(px, 0, px + w, 0);
+      gr.addColorStop(0, g(v - 70)); gr.addColorStop(0.3, g(v)); gr.addColorStop(0.5, g(v + 14)); gr.addColorStop(0.8, g(v - 20)); gr.addColorStop(1, g(v - 70));
+      c.fillStyle = gr; c.fillRect(px, py, w, h);
+      const sh = c.createLinearGradient(0, py, 0, py + 12);
+      sh.addColorStop(0, g(60, 0.55)); sh.addColorStop(1, g(60, 0));
+      c.fillStyle = sh; c.fillRect(px, py, w, 12);
+    }
+    grain(c, 10, 14);
+  },
+  roofflat(c, r) {
+    fill(c, D, 226); grain(c, 30, 15);
+    specks(c, 700, r, 0.6, 1.6, 170, 0.35, 255);
+    blotches(c, 8, r, 20, 60, 190, 190, 0.05, 0.12);
+    for (const y of [0, 128]) { hline(c, y, 252, 0.8, 3); hline(c, y + 3, 170, 0.5, 1); }
+  },
+  tile(c, r) {
+    fill(c, D, 172);
+    const n = 4, s = D / n;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) bevel(c, x * s + 2, y * s + 2, s - 4, s - 4, 234 + r() * 16, 14, 20, 2.5, 3);
+    const gr = c.createLinearGradient(0, 0, D, D);
+    gr.addColorStop(0, g(255, 0)); gr.addColorStop(0.45, g(255, 0.12)); gr.addColorStop(0.55, g(255, 0)); gr.addColorStop(1, g(255, 0));
+    c.fillStyle = gr; c.fillRect(0, 0, D, D);
+    grain(c, 5, 16);
+  },
+  cobble(c, r) {
+    fill(c, D, 128);
+    const n = 6, s = D / n;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const v = 196 + r() * 50;
+      const w = s * (0.78 + r() * 0.14), h = s * (0.74 + r() * 0.14);
+      const cx = x * s + s / 2 + (y % 2) * s / 2 + (r() - 0.5) * 4, cy = y * s + s / 2 + (r() - 0.5) * 4;
+      wrap(cx, cy, s, (px, py) => {
+        c.fillStyle = g(v - 40); c.beginPath(); c.roundRect(px - w / 2 + 1.5, py - h / 2 + 2, w, h, 12); c.fill();
+        c.fillStyle = g(v); c.beginPath(); c.roundRect(px - w / 2, py - h / 2, w, h, 12); c.fill();
+        c.fillStyle = g(255, 0.3); c.beginPath(); c.roundRect(px - w / 2 + 4, py - h / 2 + 3, w * 0.6, h * 0.25, 6); c.fill();
+      });
+    }
+    grain(c, 12, 17);
+  },
+  stone(c, r) {
+    fill(c, D, 150);
+    const rows = 5, h = D / rows;
     for (let y = 0; y < rows; y++) {
-      for (let x = -1; x < 5; x++) {
-        const ox = (y % 2) * w / 2;
-        const v = 175 + Math.floor(r() * 70);
-        ctx.fillStyle = `rgb(${v},${v},${v})`;
-        ctx.fillRect(x * w + ox + 2, y * h + 2, w - 4, h - 4);
+      let x = (r() * 30) | 0; const x0 = x;
+      while (x < x0 + D) {
+        const w = Math.min(x0 + D - x, 40 + r() * 52);
+        const v = 196 + r() * 46;
+        for (const px of [x, x - D]) if (px + w > 0 && px < D) bevel(c, px + 2.5, y * h + 2.5, w - 5, h - 5, v, 22, 36, 3, 7);
+        x += w;
       }
     }
-    noise(ctx, s, 22, 4);
+    specks(c, 260, r, 0.6, 1.5, 150, 0.3);
+    grain(c, 12, 18);
   },
-  planks(ctx, s) {
-    fill(ctx, s, 210);
-    const n = 6, h = s / n;
-    const r = rng(11);
+  panel(c, r) {
+    fill(c, D, 238);
+    const s = D / 2;
+    for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) {
+      c.fillStyle = g(252, 0.6); c.fillRect(x * s + 10, y * s + 10, s - 20, 2);
+      c.fillStyle = g(214, 0.6); c.fillRect(x * s + 10, y * s + s - 12, s - 20, 2);
+      for (const [bx, by] of [[8, 8], [s - 8, 8], [8, s - 8], [s - 8, s - 8]]) {
+        c.fillStyle = g(160, 0.8); c.beginPath(); c.arc(x * s + bx + 0.6, y * s + by + 0.6, 2.6, 0, 7); c.fill();
+        c.fillStyle = g(250); c.beginPath(); c.arc(x * s + bx, y * s + by, 2.2, 0, 7); c.fill();
+      }
+    }
+    for (const p of [0, s]) { hline(c, p, 150, 0.8, 2); hline(c, p + 2, 255, 0.7, 1); vline(c, p, 160, 0.8, 2); vline(c, p + 2, 255, 0.6, 1); }
+    blotches(c, 10, r, 20, 60, 255, 215, 0.04, 0.08);
+    grain(c, 5, 19);
+  },
+  adobe(c, r) {
+    fill(c, D, 240); blotches(c, 40, r, 12, 56, 255, 200, 0.05, 0.13);
+    cracks(c, r, 5, 150, 0.28, 1, 4);
+    c.strokeStyle = g(190, 0.3); c.lineWidth = 1;
+    for (let i = 0; i < 70; i++) { const x = r() * D, y = r() * D, a = r() * 3; c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.cos(a) * 4, y + Math.sin(a) * 4); c.stroke(); }
+    grain(c, 14, 20);
+  },
+  asphalt(c, r) {
+    fill(c, D, 214); grain(c, 44, 21);
+    specks(c, 900, r, 0.5, 1.4, 250, 0.35, 120);
+    blotches(c, 10, r, 20, 60, 190, 190, 0.06, 0.14);
+    c.fillStyle = g(198, 0.7); c.beginPath(); c.roundRect(150, 60, 70, 48, 6); c.fill();
+    c.strokeStyle = g(150, 0.5); c.lineWidth = 1.5; c.stroke();
+    cracks(c, r, 4, 100, 0.55, 1.4, 6);
+  },
+  paint(c) { fill(c, D, 246); grain(c, 6, 22); },
+  trim(c) { fill(c, D, 248); grain(c, 5, 23); },
+  fence(c, r) {
+    fill(c, D, 110);
+    const n = 8, w = D / n;
     for (let i = 0; i < n; i++) {
-      const v = 185 + Math.floor(r() * 60);
-      ctx.fillStyle = `rgb(${v},${v},${v})`;
-      ctx.fillRect(0, i * h, s, h - 2);
-      ctx.strokeStyle = 'rgba(0,0,0,0.12)';
-      for (let k = 0; k < 4; k++) { ctx.beginPath(); const yy = i * h + r() * h; ctx.moveTo(0, yy); ctx.bezierCurveTo(s * 0.3, yy + 3, s * 0.6, yy - 3, s, yy); ctx.stroke(); }
-      ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, i * h + h - 2, s, 2);
-      ctx.fillRect(Math.floor(r() * s), i * h, 2, h);
+      const v = 220 + r() * 28;
+      c.fillStyle = g(v); c.fillRect(i * w + 2, 0, w - 4, D);
+      c.fillStyle = g(255, 0.3); c.fillRect(i * w + 2, 0, 1.5, D);
+      c.strokeStyle = g(120, 0.08); c.lineWidth = 1;
+      for (let k = 0; k < 4; k++) { const x = i * w + 4 + r() * (w - 8); c.beginPath(); c.moveTo(x, 0); c.lineTo(x + (r() - 0.5) * 4, D); c.stroke(); }
+      for (const y of [40, 216]) { c.fillStyle = g(120, 0.7); c.beginPath(); c.arc(i * w + w / 2, y, 1.8, 0, 7); c.fill(); }
     }
-    noise(ctx, s, 14, 12);
+    grain(c, 8, 24);
   },
-  wood(ctx, s) {
-    fill(ctx, s, 205);
-    const r = rng(21);
-    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-    for (let i = 0; i < 30; i++) { ctx.beginPath(); const y = r() * s; ctx.moveTo(0, y); ctx.bezierCurveTo(s * 0.3, y + 6 * r(), s * 0.7, y - 6 * r(), s, y); ctx.stroke(); }
-    noise(ctx, s, 12, 22);
+  door(c) {
+    fill(c, D, 238);
+    const panel = (x, y, w, h) => {
+      c.fillStyle = g(205); c.fillRect(x, y, w, h);
+      c.fillStyle = g(250); c.fillRect(x + 6, y + 6, w - 12, h - 12);
+      c.fillStyle = g(255, 0.8); c.fillRect(x, y, w, 2); c.fillRect(x, y, 2, h);
+      c.fillStyle = g(170, 0.8); c.fillRect(x, y + h - 2, w, 2); c.fillRect(x + w - 2, y, 2, h);
+    };
+    panel(D * 0.16, D * 0.08, D * 0.68, D * 0.38);
+    panel(D * 0.16, D * 0.54, D * 0.68, D * 0.38);
+    grain(c, 8, 25);
   },
-  logs(ctx, s) {
-    fill(ctx, s, 190);
-    const n = 5, h = s / n;
-    for (let i = 0; i < n; i++) {
-      const g = ctx.createLinearGradient(0, i * h, 0, i * h + h);
-      g.addColorStop(0, 'rgb(150,150,150)'); g.addColorStop(0.3, 'rgb(225,225,225)'); g.addColorStop(0.8, 'rgb(200,200,200)'); g.addColorStop(1, 'rgb(110,110,110)');
-      ctx.fillStyle = g; ctx.fillRect(0, i * h, s, h);
+  carpet(c, r) {
+    fill(c, D, 236); grain(c, 26, 26);
+    c.strokeStyle = g(200, 0.08); c.lineWidth = 2;
+    for (let i = -D; i < D * 2; i += 12) { c.beginPath(); c.moveTo(i, 0); c.lineTo(i + D, D); c.stroke(); }
+    blotches(c, 8, r, 20, 60, 255, 210, 0.04, 0.08);
+  },
+  ceiling(c, r) {
+    fill(c, D, 246);
+    specks(c, 900, r, 0.4, 1.0, 200, 0.4);
+    for (let p = 0; p < D; p += 64) { hline(c, p, 200, 0.8, 2); vline(c, p, 200, 0.8, 2); }
+    grain(c, 6, 27);
+  },
+  // ground textures (grayscale, tinted per vertex by the theme ground color)
+  grass(c, r) {
+    fill(c, D, 224);
+    blotches(c, 34, r, 14, 50, 255, 172, 0.08, 0.18);
+    c.lineWidth = 1.2; c.lineCap = 'round';
+    for (let i = 0; i < 3600; i++) {
+      const v = 150 + r() * 105, x = r() * D, y = r() * D, l = 2.5 + r() * 5, a = (r() - 0.5) * 0.8;
+      c.strokeStyle = g(v, 0.5); c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.sin(a) * l, y - Math.cos(a) * l); c.stroke();
     }
-    noise(ctx, s, 16, 31);
+    grain(c, 10, 28);
   },
-  metal(ctx, s) {
-    fill(ctx, s, 215);
-    const r = rng(41);
-    for (let y = 0; y < s; y++) { const v = 200 + r() * 40; ctx.fillStyle = `rgba(${v},${v},${v},0.5)`; ctx.fillRect(0, y, s, 1); }
-    noise(ctx, s, 10, 42);
-  },
-  metalfloor(ctx, s) {
-    fill(ctx, s, 190);
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    const n = 8, g = s / n;
-    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-      ctx.save(); ctx.translate(x * g + g / 2, y * g + g / 2); ctx.rotate((x + y) % 2 ? 0.7 : -0.7);
-      ctx.fillRect(-g * 0.3, -g * 0.07, g * 0.6, g * 0.14); ctx.restore();
+  sand(c, r) {
+    fill(c, D, 240);
+    c.lineWidth = 2;
+    for (let y = 0; y < D; y += 16) {
+      const ph = r() * 6;
+      for (const [dy, v, a] of [[0, 255, 0.4], [3, 196, 0.22]]) {
+        c.strokeStyle = g(v, a); c.beginPath();
+        for (let x = 0; x <= D; x += 8) { const yy = y + dy + Math.sin((x / D) * Math.PI * 4 + ph) * 3; if (x) c.lineTo(x, yy); else c.moveTo(x, yy); }
+        c.stroke();
+      }
     }
-    noise(ctx, s, 14, 43);
+    blotches(c, 18, r, 20, 60, 255, 205, 0.05, 0.1);
+    specks(c, 120, r, 0.8, 1.8, 170, 0.4);
+    grain(c, 12, 29);
   },
-  corrugated(ctx, s) {
-    const n = 16, w = s / n;
-    for (let i = 0; i < n; i++) {
-      const g = ctx.createLinearGradient(i * w, 0, i * w + w, 0);
-      g.addColorStop(0, 'rgb(150,150,150)'); g.addColorStop(0.5, 'rgb(240,240,240)'); g.addColorStop(1, 'rgb(150,150,150)');
-      ctx.fillStyle = g; ctx.fillRect(i * w, 0, w, s);
+  snow(c, r) {
+    fill(c, D, 250); blotches(c, 30, r, 16, 60, 255, 226, 0.08, 0.16);
+    specks(c, 400, r, 0.5, 1.1, 255, 0.9);
+    grain(c, 6, 30);
+  },
+  dirt(c, r) {
+    fill(c, D, 230); grain(c, 22, 31);
+    blotches(c, 28, r, 10, 40, 255, 190, 0.06, 0.14);
+    for (let i = 0; i < 110; i++) {
+      const x = r() * D, y = r() * D, rad = 1.5 + r() * 3.5, v = 190 + r() * 55;
+      wrap(x, y, rad + 2, (px, py) => {
+        c.fillStyle = g(120, 0.35); c.beginPath(); c.ellipse(px + 0.8, py + 1, rad, rad * 0.75, 0, 0, 7); c.fill();
+        c.fillStyle = g(v); c.beginPath(); c.ellipse(px, py, rad, rad * 0.75, 0, 0, 7); c.fill();
+      });
     }
-    blotches(ctx, s, 25, 44, 5, 25, 120, 120);
-    noise(ctx, s, 10, 45);
   },
-  container(ctx, s) {
-    const n = 12, w = s / n;
-    for (let i = 0; i < n; i++) {
-      ctx.fillStyle = i % 2 ? 'rgb(200,200,200)' : 'rgb(240,240,240)';
-      ctx.fillRect(i * w, 0, w, s);
-      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(i * w, 0, 2, s);
+  ice(c, r) {
+    fill(c, D, 242);
+    for (let i = 0; i < 14; i++) { const x = r() * D; const gr = c.createLinearGradient(x, 0, x + 60, D); gr.addColorStop(0, g(255, 0)); gr.addColorStop(0.5, g(255, 0.35)); gr.addColorStop(1, g(255, 0)); c.fillStyle = gr; c.fillRect(0, 0, D, D); }
+    cracks(c, r, 7, 190, 0.35, 1.2, 6);
+    cracks(c, r, 7, 255, 0.9, 1.2, 6);
+    grain(c, 6, 32);
+  },
+  water(c, r) {
+    fill(c, D, 232);
+    c.lineWidth = 1.6; c.lineCap = 'round';
+    for (let i = 0; i < 90; i++) {
+      const x = r() * D, y = r() * D, l = 6 + r() * 16;
+      wrap(x, y, l, (px, py) => { c.strokeStyle = g(255, 0.55); c.beginPath(); c.arc(px, py, l, Math.PI * 1.15, Math.PI * 1.85); c.stroke(); c.strokeStyle = g(196, 0.25); c.beginPath(); c.arc(px, py + 2.5, l, Math.PI * 1.2, Math.PI * 1.8); c.stroke(); });
     }
-    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(0, 0, s, 6); ctx.fillRect(0, s - 6, s, 6);
-    blotches(ctx, s, 20, 46, 4, 20, 140, 140);
-    noise(ctx, s, 12, 47);
+    grain(c, 4, 33);
   },
-  roof(ctx, s) {
-    fill(ctx, s, 200);
-    const rows = 8, h = s / rows, w = s / 6;
-    const r = rng(51);
-    for (let y = 0; y < rows; y++) for (let x = -1; x < 7; x++) {
-      const v = 170 + Math.floor(r() * 70);
-      ctx.fillStyle = `rgb(${v},${v},${v})`;
-      const ox = (y % 2) * w / 2;
-      ctx.beginPath(); ctx.roundRect(x * w + ox + 1, y * h, w - 2, h + 4, [0, 0, 8, 8]); ctx.fill();
-      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(x * w + ox, y * h + h - 1, w, 2);
-    }
-    noise(ctx, s, 14, 52);
-  },
-  roofflat(ctx, s) { fill(ctx, s, 200); noise(ctx, s, 60, 53); },
-  tile(ctx, s) {
-    fill(ctx, s, 120);
-    const n = 4, g = s / n;
-    const r = rng(61);
-    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) { const v = 220 + Math.floor(r() * 30); ctx.fillStyle = `rgb(${v},${v},${v})`; ctx.fillRect(x * g + 2, y * g + 2, g - 4, g - 4); }
-    noise(ctx, s, 8, 62);
-  },
-  cobble(ctx, s) {
-    fill(ctx, s, 110);
-    const r = rng(71);
-    for (let i = 0; i < 70; i++) {
-      const v = 170 + Math.floor(r() * 70);
-      ctx.fillStyle = `rgb(${v},${v},${v})`;
-      ctx.beginPath(); ctx.ellipse(r() * s, r() * s, 10 + r() * 14, 8 + r() * 10, r() * 3, 0, Math.PI * 2); ctx.fill();
-    }
-    noise(ctx, s, 16, 72);
-  },
-  stone(ctx, s) {
-    fill(ctx, s, 120);
-    const r = rng(81);
-    for (let y = 0; y < 6; y++) for (let x = 0; x < 5; x++) {
-      const v = 160 + Math.floor(r() * 80);
-      ctx.fillStyle = `rgb(${v},${v},${v})`;
-      ctx.beginPath(); ctx.roundRect(x * (s / 5) + (y % 2) * 20 - 10 + 2, y * (s / 6) + 2, s / 5 - 4 + r() * 6, s / 6 - 4, 8); ctx.fill();
-    }
-    noise(ctx, s, 18, 82);
-  },
-  panel(ctx, s) {
-    fill(ctx, s, 232);
-    ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    ctx.fillRect(0, 0, s, 3); ctx.fillRect(0, 0, 3, s); ctx.fillRect(s / 2, 0, 2, s);
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    for (const [x, y] of [[10, 10], [s - 14, 10], [10, s - 14], [s - 14, s - 14]]) ctx.fillRect(x, y, 4, 4);
-    noise(ctx, s, 8, 91);
-  },
-  adobe(ctx, s) { fill(ctx, s, 225); blotches(ctx, s, 80, 101, 5, 30, 245, 190); noise(ctx, s, 22, 102); },
-  asphalt(ctx, s) { fill(ctx, s, 200); noise(ctx, s, 70, 111); blotches(ctx, s, 20, 112, 10, 40, 160, 160); },
-  paint(ctx, s) { fill(ctx, s, 245); noise(ctx, s, 20, 121); },
-  fence(ctx, s) {
-    fill(ctx, s, 200);
-    for (let i = 0; i < 8; i++) { ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(i * s / 8, 0, 3, s); }
-    noise(ctx, s, 14, 131);
-  },
-  door(ctx, s) {
-    fill(ctx, s, 215);
-    ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 6;
-    ctx.strokeRect(s * 0.15, s * 0.08, s * 0.7, s * 0.38);
-    ctx.strokeRect(s * 0.15, s * 0.54, s * 0.7, s * 0.38);
-    noise(ctx, s, 12, 141);
-  },
-  // ground textures (full color)
-  grass(ctx, s) {
-    fill(ctx, s, 'rgb(205,235,190)');
-    const r = rng(151);
-    for (let i = 0; i < 2600; i++) {
-      const v = 150 + r() * 100;
-      ctx.fillStyle = `rgba(${v * 0.7},${v},${v * 0.6},0.6)`;
-      ctx.fillRect(r() * s, r() * s, 1 + r() * 2, 2 + r() * 5);
-    }
-    blotches(ctx, s, 30, 152, 10, 40, 255, 150);
-  },
-  sand(ctx, s) { fill(ctx, s, 'rgb(240,225,200)'); noise(ctx, s, 40, 161); blotches(ctx, s, 40, 162, 10, 40, 255, 190); },
-  snow(ctx, s) { fill(ctx, s, 'rgb(250,252,255)'); noise(ctx, s, 14, 171); blotches(ctx, s, 40, 172, 10, 50, 255, 220); },
-  dirt(ctx, s) { fill(ctx, s, 'rgb(215,200,180)'); noise(ctx, s, 50, 181); blotches(ctx, s, 40, 182, 5, 30, 240, 150); },
-  ice(ctx, s) {
-    fill(ctx, s, 'rgb(225,240,255)');
-    ctx.strokeStyle = 'rgba(255,255,255,0.8)'; const r = rng(191);
-    for (let i = 0; i < 20; i++) { ctx.beginPath(); ctx.moveTo(r() * s, r() * s); ctx.lineTo(r() * s, r() * s); ctx.stroke(); }
-    noise(ctx, s, 10, 192);
-  },
-  water(ctx, s) { fill(ctx, s, 'rgb(200,230,255)'); noise(ctx, s, 20, 201); },
 };
 
 export function tex(name, repeat = true) {
-  const key = name;
-  if (cache.has(key)) return cache.get(key);
+  if (cache.has(name)) return cache.get(name);
   const gen = GEN[name];
   if (!gen) return null;
   const c = canvas();
   const ctx = c.getContext('2d', { willReadFrequently: true });
-  gen(ctx, c.width);
+  ctx.save();
+  ctx.scale(c.width / D, c.height / D);
+  let seed = 7;
+  for (const ch of name) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+  gen(ctx, rng(seed));
+  ctx.restore();
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 4;
-  cache.set(key, t);
+  t.anisotropy = ANISO;
+  cache.set(name, t);
   return t;
 }
 
 // meters covered by one texture repeat
 export const TEX_SCALE = {
-  plaster: 3, concrete: 4, brick: 2.4, planks: 2.4, wood: 2, logs: 1.8, metal: 2, metalfloor: 2, corrugated: 3,
-  container: 2.4, roof: 2.5, roofflat: 3, tile: 2, cobble: 3, stone: 2.5, panel: 2.5, adobe: 3, asphalt: 6, paint: 2,
-  fence: 2.4, door: 1, grass: 6, sand: 6, snow: 6, dirt: 5, ice: 6, water: 8,
+  plaster: 3, stucco: 2.5, concrete: 4, brick: 2.4, planks: 2.4, siding: 2.4, wood: 2, logs: 1.8, metal: 2, metalfloor: 2, corrugated: 3,
+  container: 2.4, roof: 2.5, rooftile: 2.4, roofflat: 3, tile: 2, cobble: 3, stone: 2.5, panel: 2.5, adobe: 3, asphalt: 6, paint: 2,
+  trim: 2, fence: 2.4, door: 1, carpet: 2, ceiling: 2.4, grass: 5, sand: 6, snow: 6, dirt: 5, ice: 6, water: 8,
 };
+
+// soft round contact-shadow blob (alpha in the texture)
+export function blobTexture() {
+  if (cache.has('blob')) return cache.get('blob');
+  const c = canvas(64);
+  const x = c.getContext('2d');
+  const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.45, 'rgba(255,255,255,0.75)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c);
+  cache.set('blob', t);
+  return t;
+}
 
 // small canvas textures used for faces / labels
 export function faceTexture(kind) {
