@@ -1,9 +1,10 @@
 import { h } from '../util/dom.js';
 import { MODES } from '/shared/constants.js';
-import { getMapMeta } from './maps.js';
+import { getMapMeta, mapPreviewStyle } from './maps.js';
+import { modeArt, logo } from './art.js';
 
 const TIPS = [
-  'Press E to open doors, search containers, pick things up and pass the Boob-tato.',
+  'Press E to open doors, search containers, pick things up and pass the hot potato.',
   'Hold Shift to sprint. Space to jump. Hold Tab for the scoreboard.',
   'In Grab the Item, punch the carrier to make them drop the chicken — then grab it!',
   'Searching a container takes a second. Stay close or you will cancel it.',
@@ -17,16 +18,20 @@ const TIPS = [
 export class LoadingScreen {
   constructor(app, d) {
     const meta = getMapMeta(d.mapId);
+    const mode = MODES[d.mode];
     this.bar = h('div');
-    this.label = h('div', { class: 'hint', text: 'Loading…' });
-    this.el = h('div', { class: 'loading-wrap' },
-      h('div', { class: 'logo small' }, 'yoink', h('span', { class: 'bang', text: '!' })),
-      h('h1', { style: { margin: '10px 0 0' }, text: `${MODES[d.mode].icon} ${MODES[d.mode].name}` }),
-      h('h2', { style: { margin: 0, color: '#ffd23f' }, text: meta ? meta.name : d.mapId }),
+    this.label = h('div', { class: 'loading-label', text: 'Loading…' });
+    this.el = h('div', { class: 'loading-wrap', style: { '--mc': mode.color } },
+      h('div', { class: 'loading-bg', style: mapPreviewStyle(d.mapId) }),
+      logo('medium'),
+      h('div', { class: 'mode-art' }, modeArt(d.mode)),
+      h('div', { class: 'loading-mode', text: mode.name }),
+      h('h1', { class: 'loading-map', text: meta ? meta.name : d.mapId }),
+      meta && meta.desc ? h('p', { class: 'loading-desc', text: meta.desc }) : null,
       d.rejoin ? h('div', { class: 'chip', text: 'Rejoining your match…' }) : null,
       h('div', { class: 'loading-bar' }, this.bar),
       this.label,
-      h('p', { class: 'tip', text: '💡 ' + TIPS[Math.floor(Math.random() * TIPS.length)] }));
+      h('div', { class: 'tip' }, h('span', { class: 'tip-k', text: 'TIP' }), h('span', { text: TIPS[Math.floor(Math.random() * TIPS.length)] })));
   }
   progress(p, label) {
     this.bar.style.width = Math.round(p * 100) + '%';
