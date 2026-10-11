@@ -164,6 +164,7 @@ npm run previews   # re-render the map vote thumbnails (needs Chromium/Chrome)
 * **tests/sim.test.js**: bot-only matches of **all 5 modes on all 7 maps** (35 matches, fast-forwarded), each checked for a valid finish.
 * **tests/maps.test.js**: every map builds, and every spawn, loot spot, container, bench, resource and objective is reachable on the bot navigation graph.
 * **tests/physics.test.js**: gravity, collisions, step-up, jumping, no tunnelling.
+* **tests/robustness.test.js**: a hostile client: malformed payloads on every kind of socket event (the server must keep running), speed hacks and flying (must be corrected).
 
 Browser checks in `tools/` drive the real client with Playwright (`playwright-core`). Set `CHROMIUM_PATH` to a Chrome/Chromium executable if needed:
 
@@ -198,16 +199,19 @@ start-yoink.sh     same for macOS/Linux
 
 ### How multiplayer works
 
-* The client predicts its own movement with the same physics code as the server and sends its position at 20 Hz. The server validates every update: speed limits, no passing through walls, no standing inside solids, teleports, frozen states. Invalid moves are corrected.
+* The client predicts its own movement with the same physics code as the server and sends its position at 20 Hz. The server validates every update: a per-player distance budget (sending packets faster doesn't make you faster), a jump-arc check (no flying or hovering), no passing through walls, fences or floors, no standing inside solids, teleports and frozen states. Invalid moves are snapped back.
+* Interactions need reach: loot, containers, resources, doors, the chicken and potato passes are refused through walls.
+* Lag compensation uses a round-trip time measured by the server, for shots and for punches/tags, against humans and bots alike.
 * The server is authoritative for everything else: tags, passes, punches, item possession and deliveries, loot pickup ranges, container searches, ammo, reloads, fire rate, hit detection (server-side raycasts with lag compensation), damage, armor, healing, crafting (bench distance + materials), eliminations, timers, win conditions, rewards, coins, crates and skins.
 * Snapshots go out at 20 Hz and other players are interpolated about 110 ms behind for smooth motion.
-* If you lose connection mid-match you have 45 s to come back: reconnecting puts you straight back into the same match.
+* If you lose connection mid-match you have 45 s to come back: reconnecting (or reloading the page) puts you straight back into the same match, including during the map vote. If the match ended meanwhile, you are sent back to the menu.
 
 ### Security notes
 
 * Passwords are hashed with **scrypt** and a per-user salt. The database only stores a SHA-256 hash of each session token.
 * Every socket connection is authenticated with the session token. Logging out deletes the session server-side.
-* Login and registration are rate limited. Socket payloads are type-checked, and chat text is sanitized and rendered as text (never HTML).
+* Login and registration are rate limited (per address and per account name). Socket payloads are type-checked, a broken packet can't crash the server, and chat text is sanitized and rendered as text (never HTML).
+* Party chat is only visible to members, and only from the moment they joined.
 * Clients can't grant themselves coins, wins, skins or items: all of those are computed and persisted by the server.
 
 ### Known limitations
