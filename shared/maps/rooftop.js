@@ -37,6 +37,17 @@ export function build() {
   // street level far below (visual only) + distant skyline
   b.box(-140, -1, -140, 140, 0, 140, 'asphalt', 0x4a4a52, { col: false });
   for (const v of [-17, 17]) { overlay(b, v - 6, -140, v + 6, 140, 'asphalt', 0x3d3d44, 0.02); overlay(b, -140, v - 6, 140, v + 6, 'asphalt', 0x3d3d44, 0.02); }
+  // life on the streets far below: parked cars, street lamps and trees on the sidewalks
+  for (const v of [-17, 17]) {
+    for (let t = -60; t <= 60; t += 13) {
+      b.prop('car', v + (t % 26 === 0 ? -3.2 : 3.2), 0, t + rng() * 4, t % 26 === 0 ? 0 : Math.PI, 1, { color: rng.pick([0xe03131, 0x1c7ed6, 0xf59f00, 0xf8f9fa, 0x2f9e44, 0x7048e8]) });
+      b.prop('car', t + rng() * 4, 0, v + (t % 26 === 0 ? 3.2 : -3.2), t % 26 === 0 ? Math.PI / 2 : -Math.PI / 2, 1, { color: rng.pick([0xe03131, 0x1c7ed6, 0xf59f00, 0xf8f9fa, 0x2f9e44]) });
+    }
+    for (let t = -62; t <= 62; t += 9) {
+      b.prop('lamp', v - 6.6, 0, t, 0, 1); b.prop('lamp', t, 0, v + 6.6, 0, 1);
+      if ((t / 9) % 2 === 0) { b.prop('tree', v + 6.8, 0, t + 4, 0, 0.9); b.prop('tree', t + 4, 0, v - 6.8, 0, 0.9); }
+    }
+  }
   for (let i = 0; i < 28; i++) {
     const a = (i / 28) * Math.PI * 2, r = 80 + rng() * 40;
     const x = Math.cos(a) * r, z = Math.sin(a) * r, w = 10 + rng() * 14, hh = 18 + rng() * 45;
@@ -113,6 +124,20 @@ function rampRails(b, a0, a1, at, ylo, yhi, axis) {
   }
 }
 
+// Fairy lights strung across a roof: a thin cable with glowing bulbs (decor only)
+function stringLights(F, ax, az, bx, bz, h) {
+  const len = Math.hypot(bx - ax, bz - az);
+  const n = Math.max(4, Math.round(len / 0.9));
+  const cols = [0xffd43b, 0xff6b6b, 0x69db7c, 0x4dabf7, 0xda77f2];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+    const y = h - Math.sin(t * Math.PI) * 0.7; // sag
+    F.box(x - 0.07, y - 0.16, z - 0.07, x + 0.07, y - 0.02, z + 0.07, 'light', cols[i % cols.length], { col: false, emissive: true });
+  }
+  for (const [x, z] of [[ax, az], [bx, bz]]) F.box(x - 0.06, 0, z - 0.06, x + 0.06, h + 0.05, z + 0.06, 'metal', 0x3a3f47, { col: false });
+}
+
 // Rooftop structures per building (local frame centered on the roof at y=0)
 function decorateRoof(b, F, r, c, h, rng) {
   const key = r * 3 + c;
@@ -170,6 +195,28 @@ function decorateRoof(b, F, r, c, h, rng) {
     5: [['crate', -8.5, -8.5]], 6: [['crate', 8.5, -0.5]], 7: [['ammobox', -8.5, -1]], 8: [['crate', 8.5, 8.5]] };
   for (const [kind, x, z] of extra[key] || []) F.container(kind, x, 0, z, 0, kind === 'ammobox' ? 2 : 1);
   F.loot(0.5, 0, -8.6, key === 4 ? 2 : 0, 'roof');
+
+  // a bit of life on every roof: gardens, cafes, billboards, lights
+  const garden = (x0, z0, x1, z1) => {
+    F.box(x0, 0, z0, x1, 0.03, z1, 'grass', 0x6fbf4a, { col: false });
+    F.box(x0 - 0.12, 0, z0 - 0.12, x1 + 0.12, 0.1, z0, 'concrete', 0xcfc8bb, { col: false });
+    F.box(x0 - 0.12, 0, z1, x1 + 0.12, 0.1, z1 + 0.12, 'concrete', 0xcfc8bb, { col: false });
+  };
+  switch (key) {
+    case 0: F.prop('planter', -1, 0, -9.6, 0, 1); F.prop('planter', 4.5, 0, -9.6, 0, 1); stringLights(F, -9.5, -9.5, 9.5, 9.5, 3.2); break;
+    case 1: F.prop('billboard', 0, 0, -9.7, 2, 1, { color: 0xff4d6d }); F.prop('planter', 8.6, 0, 1, 1, 1); break;
+    case 2: // rooftop cafe
+      F.prop('umbrella', -3, 0, 4, 0, 1, { color: 0xff6b6b }); F.prop('umbrella', -6.5, 0, 6.5, 0, 1, { color: 0x4dabf7 }); F.prop('umbrella', -1.5, 0, 8, 0, 1, { color: 0xffd43b });
+      stringLights(F, -9.5, 2, -0.5, 9.5, 2.9); stringLights(F, -9.5, 9.5, -0.5, 2, 3.0);
+      break;
+    case 3: garden(-9.6, -3.5, -1.5, 1.6); F.prop('bush', -7, 0, -1, 0, 1); F.prop('flowers', -3.5, 0, -2, 0, 1); F.prop('flowers', -5, 0, 0.8, 0, 1); break;
+    case 4: stringLights(F, -9.5, -9.5, 9.5, -9.5, 3.4); stringLights(F, -9.5, 9.5, 9.5, 9.5, 3.4); F.prop('planter', -9.4, 0, 0, 1, 1); F.prop('planter', 9.4, 0, 0, 1, 1); break;
+    case 5: garden(-9.6, 2.2, -2.5, 9.6); F.prop('tree', -8.3, 0, 3.4, 0, 0.75); F.prop('flowers', -4, 0, 4, 0, 1); F.prop('planter', 9.4, 0, 3, 1, 1); break;
+    case 6: F.prop('umbrella', 0, 0, 3, 0, 1, { color: 0x51cf66 }); F.prop('umbrella', 3, 0, 6, 0, 1, { color: 0xff922b }); stringLights(F, -9.5, -9.5, 9.5, 9.5, 3.2); break;
+    case 7: F.prop('billboard', 0, 0, 9.7, 0, 1, { color: 0x4cc9f0 }); F.prop('planter', -9.4, 0, -3, 1, 1); break;
+    case 8: garden(1.5, 2.5, 9.6, 9.6); F.prop('bush', 7, 0, 8, 0, 1); F.prop('flowers', 3.5, 0, 4.5, 0, 1); stringLights(F, -9.5, 9.5, 9.5, -9.5, 3.1); break;
+    default:
+  }
 
   // item spawns: inside huts / greenhouses on outer buildings
   const spawnsFor = { 0: [-5, -5, 0.05], 2: [5, 5, 0.05], 3: [-6, 5, 0.05], 5: [4, -3, 0.05], 6: [5, -5, 0.05], 8: [-5, -5, 0.05] };
