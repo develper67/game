@@ -40,7 +40,8 @@ function tri(arr, a, b, c, col, uvs) {
   }
   arr.idx.push(base, base + 1, base + 2);
 }
-const lin = (hex) => { _col.set(hex ?? 0xffffff).convertSRGBToLinear(); return [_col.r, _col.g, _col.b]; };
+// Color.set() already converts sRGB hex to the linear working space
+const lin = (hex) => { _col.set(hex ?? 0xffffff); return [_col.r, _col.g, _col.b]; };
 const mul = (c, k) => [c[0] * k, c[1] * k, c[2] * k];
 
 // Add a box. Vertical faces get a vertical AO gradient when the box rests on
@@ -547,8 +548,7 @@ function buildGround(map, quality, shadows) {
     uv[k * 2] = x * ts; uv[k * 2 + 1] = -z * ts;
     const n = vnoise(x / 11, z / 11) * 0.65 + vnoise(x / 4.3 + 17, z / 4.3) * 0.35;
     tmpC.copy(cDark).lerp(cLight, Math.min(1, Math.max(0, (n - 0.2) / 0.6)));
-    tmpC.convertSRGBToLinear();
-    const ao = 1 - 0.5 * Math.min(1, covAt(x, z) * 1.3);
+    const ao = 1 - 0.28 * Math.min(1, covAt(x, z) * 1.3);
     col[k * 3] = tmpC.r * ao; col[k * 3 + 1] = tmpC.g * ao; col[k * 3 + 2] = tmpC.b * ao;
   }
   const idx = [];
@@ -754,8 +754,8 @@ function mergePlain(geos) {
 export function themeLighting(map) {
   const th = map.theme;
   return {
-    hemiSky: th.hemi?.sky ?? 0xcfe9ff, hemiGround: th.hemi?.ground ?? 0x6d6d6d, hemiI: (th.hemi?.intensity ?? 1.1) * 0.8,
-    ambientC: th.ambientC ?? 0xffffff, ambientI: th.ambient ?? (map.indoor ? 0.75 : 0.5),
+    hemiSky: th.hemi?.sky ?? 0xcfe9ff, hemiGround: th.hemi?.ground ?? 0x6d6d6d, hemiI: (th.hemi?.intensity ?? 1.1) * 0.92,
+    ambientC: th.ambientC ?? 0xffffff, ambientI: th.ambient ?? (map.indoor ? 0.8 : 0.66),
     sunC: th.sun?.color ?? 0xffffff, sunI: th.sun?.intensity ?? 2, sunDir: new THREE.Vector3(...(th.sun?.dir || [0.5, 1, 0.3])).normalize(),
   };
 }

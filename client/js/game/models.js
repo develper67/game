@@ -12,8 +12,7 @@ const _c = new THREE.Color();
 function colorize(geo, color) {
   const n = geo.attributes.position.count;
   const arr = new Float32Array(n * 3);
-  _c.set(color);
-  _c.convertSRGBToLinear();
+  _c.set(color); // already linear: Color.set() converts sRGB hex
   for (let i = 0; i < n; i++) { arr[i * 3] = _c.r; arr[i * 3 + 1] = _c.g; arr[i * 3 + 2] = _c.b; }
   geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
   return geo;

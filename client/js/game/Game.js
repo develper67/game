@@ -6,7 +6,7 @@ import { CollisionWorld, stepBody, lookDir } from '/shared/physics.js';
 import { PHYS, NET, MODES } from '/shared/constants.js';
 import { WEAPONS, FISTS, RESOURCE_NODES, itemLabel, RECIPES, MATERIALS, MATERIAL_IDS, AMMO, HEALS } from '/shared/items.js';
 import { CONTAINER_DIMS } from '/shared/mapbuilder.js';
-import { buildWorld, buildSky } from './world.js';
+import { buildWorld, setupEnvironment } from './world.js';
 import { Avatar } from './avatar.js';
 import { ViewModel } from './viewmodel.js';
 import { Effects } from './effects.js';
@@ -91,39 +91,16 @@ export class Game {
     this.renderer = getRenderer(q);
     const pr = Math.min(window.devicePixelRatio || 1, q === 'high' ? 1.5 : q === 'medium' ? 1 : 0.75);
     this.renderer.setPixelRatio(pr);
-    this.renderer.shadowMap.enabled = q !== 'low';
-    this.renderer.shadowMap.type = q === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     this.root.appendChild(this.renderer.domElement);
     this.scene = new THREE.Scene();
-    const th = this.map.theme;
-    this.scene.background = new THREE.Color(th.skyBottom);
-    const far = q === 'low' ? Math.min(th.fogFar, 110) : th.fogFar;
-    this.scene.fog = new THREE.Fog(th.fog, th.fogNear * (q === 'low' ? 0.8 : 1), far);
-    this.camera = new THREE.PerspectiveCamera(settings.fov, 1, 0.05, far + 40);
+    // sky, fog, sun/hemisphere/fill lights and shadows for this map's theme
+    const env = setupEnvironment(this.scene, this.map, { quality: q, renderer: this.renderer });
+    this.camera = new THREE.PerspectiveCamera(settings.fov, 1, 0.05, env.far + 40);
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
-    this.sky = buildSky(th);
-    this.scene.add(this.sky);
-    const hemi = new THREE.HemisphereLight(th.hemi.sky, th.hemi.ground, th.hemi.intensity * 0.8);
-    this.scene.add(hemi);
-    // flat fill so ceilings and shaded interiors never go pitch black
-    this.scene.add(new THREE.AmbientLight(0xffffff, th.ambient ?? (this.map.indoor ? 0.75 : 0.5)));
-    const sun = new THREE.DirectionalLight(th.sun.color, th.sun.intensity);
-    const sd = new THREE.Vector3(...th.sun.dir).normalize();
-    this.sunDir = sd;
-    sun.position.copy(sd).multiplyScalar(60);
-    if (this.renderer.shadowMap.enabled) {
-      sun.castShadow = true;
-      const size = q === 'high' ? 2048 : 1024;
-      sun.shadow.mapSize.set(size, size);
-      const ext = q === 'high' ? 45 : 32;
-      sun.shadow.camera.left = -ext; sun.shadow.camera.right = ext; sun.shadow.camera.top = ext; sun.shadow.camera.bottom = -ext;
-      sun.shadow.camera.near = 1; sun.shadow.camera.far = 160;
-      sun.shadow.bias = -0.0008;
-      sun.shadow.normalBias = 0.04;
-    }
-    this.sun = sun;
-    this.scene.add(sun, sun.target);
+    this.sky = env.sky;
+    this.sun = env.sun;
+    this.sunDir = env.sunDir;
 
     const built = buildWorld(this.map, { shadows: this.renderer.shadowMap.enabled, quality: q });
     this.scene.add(built.root);

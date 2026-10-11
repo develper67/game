@@ -1,7 +1,7 @@
 // Renders a single map from its preview camera (used by tools/render-previews.mjs).
 import * as THREE from 'three';
 import { getMap } from '/shared/maps/index.js';
-import { buildWorld, buildSky } from './world.js';
+import { buildWorld, setupEnvironment } from './world.js';
 
 export function renderPreview(mapId, w = 960, h = 540) {
   const map = getMap(mapId);
@@ -14,20 +14,15 @@ export function renderPreview(mapId, w = 960, h = 540) {
   document.body.style.margin = '0';
   document.body.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(th.skyBottom);
-  scene.fog = new THREE.Fog(th.fog, th.fogNear * 2.2, th.fogFar * 2.2);
-  scene.add(buildSky(th));
-  scene.add(new THREE.HemisphereLight(th.hemi.sky, th.hemi.ground, th.hemi.intensity * 0.8));
-  scene.add(new THREE.AmbientLight(0xffffff, th.ambient ?? (map.indoor ? 0.75 : 0.5)));
-  const sun = new THREE.DirectionalLight(th.sun.color, th.sun.intensity);
-  const sd = new THREE.Vector3(...th.sun.dir).normalize();
-  sun.position.copy(sd).multiplyScalar(120);
+  const env = setupEnvironment(scene, map, { quality: 'high', renderer, far: 600, fogScale: 2.2 });
+  // the overview camera sees the whole map: a wider, sharper shadow map
+  const sun = env.sun;
+  sun.position.copy(env.sunDir).multiplyScalar(120);
   sun.castShadow = true;
   sun.shadow.mapSize.set(4096, 4096);
   const ext = 75;
   Object.assign(sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, near: 1, far: 300 });
   sun.shadow.bias = -0.0006;
-  scene.add(sun, sun.target);
   const built = buildWorld(map, { shadows: true, quality: 'high' });
   scene.add(built.root);
   if (built.table) built.table.visible = true;
