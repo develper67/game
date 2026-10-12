@@ -2,8 +2,6 @@
 import * as THREE from 'three';
 import { potatoModel, chickenModel, itemModel } from './models.js';
 import { weaponModel, MUZZLE, MUZZLE_Y } from './weapons.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 const SKIN = 0xffcc99;
 const VM_SCALE = 0.62; // first-person weapon scale
@@ -20,19 +18,7 @@ const HOLD = {
   blaster: { r: [0, -0.04, 0.05], l: [0, 0.0, -0.22], rr: [0.6, 0.3, 0], lr: [0.62, -0.42, 0.25], sight: 0.14 },
 };
 
-// Rounded cartoon fist: palm, a row of curled fingers and a thumb (origin = fist centre, knuckles toward -Z)
-function handGeometry() {
-  const parts = [];
-  const add = (geo, x, y, z, rx = 0, ry = 0, rz = 0) => {
-    geo.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(1, 1, 1)));
-    parts.push(geo.index ? geo.toNonIndexed() : geo);
-  };
-  add(new RoundedBoxGeometry(0.072, 0.07, 0.08, 2, 0.02), 0, 0, 0.004);
-  for (let i = 0; i < 4; i++) add(new RoundedBoxGeometry(0.017, 0.026, 0.036, 2, 0.007), -0.026 + i * 0.0175, 0.006 - Math.abs(i - 1.5) * 0.002, -0.04, 0.25);
-  add(new RoundedBoxGeometry(0.024, 0.025, 0.058, 2, 0.01), -0.038, -0.012, -0.012, 0.15, 0.45, 0);
-  return mergeGeometries(parts, false);
-}
-let _handGeo = null, _sleeveGeo = null, _cuffGeo = null;
+let _armGeo = null;
 
 export class ViewModel {
   constructor(sleeveColor) {
@@ -47,21 +33,15 @@ export class ViewModel {
     this.root = new THREE.Group();
     this.scene.add(this.root);
 
-    const sleeve = new THREE.MeshPhongMaterial({ color: sleeveColor || '#4cc9f0', shininess: 12, specular: 0x222222 });
-    const skin = new THREE.MeshPhongMaterial({ color: SKIN, shininess: 18, specular: 0x332211 });
-    const cuffMat = new THREE.MeshPhongMaterial({ color: 0xf4f1ea, shininess: 10 });
-    this.sleeveMat = sleeve;
-    if (!_handGeo) {
-      _handGeo = handGeometry();
-      // sleeve: slightly tapered tube running back along +Z, with a rolled cuff at the wrist
-      _sleeveGeo = new THREE.CylinderGeometry(0.047, 0.056, 0.44, 12).rotateX(Math.PI / 2).translate(0, -0.004, 0.29);
-      _cuffGeo = new THREE.TorusGeometry(0.05, 0.014, 6, 14).translate(0, -0.004, 0.075);
-    }
-    // An arm is a group whose origin is the fist; the forearm/sleeve runs back
-    // along +Z and is tilted (via the group's rotation) down out of the screen.
+    // plain blocky skin-coloured arms (flat shading keeps the clean block look)
+    const skin = new THREE.MeshLambertMaterial({ color: SKIN });
+    this.sleeveMat = new THREE.MeshLambertMaterial({ color: sleeveColor || '#4cc9f0' }); // kept for setSleeve()
+    if (!_armGeo) _armGeo = new THREE.BoxGeometry(0.1, 0.1, 0.6).translate(0, 0, 0.27);
+    // An arm is a group whose origin is the front end of the block; the arm runs
+    // back along +Z and is tilted (via the group's rotation) down out of the screen.
     const mkArm = () => {
       const g = new THREE.Group();
-      g.add(new THREE.Mesh(_handGeo, skin), new THREE.Mesh(_sleeveGeo, sleeve), new THREE.Mesh(_cuffGeo, cuffMat));
+      g.add(new THREE.Mesh(_armGeo, skin));
       return g;
     };
     this.armR = mkArm();
@@ -214,10 +194,10 @@ export class ViewModel {
       const uk = this.useT > 0 ? Math.sin((1 - this.useT / 0.25) * Math.PI) : 0;
       const breathe = Math.sin(this.t * 2) * 0.006;
       const rPunch = this.punchSide > 0 ? pk : 0, lPunch = this.punchSide < 0 ? pk : 0;
-      this.armR.position.set(0.2 - rPunch * 0.14 + baseX, -0.2 + breathe + baseY + rPunch * 0.09 + uk * 0.05, -0.45 - rPunch * 0.3 - uk * 0.18);
-      this.armR.rotation.set(0.38 - rPunch * 0.25, 0.32 - rPunch * 0.25, -0.12);
-      this.armL.position.set(-0.2 + lPunch * 0.14 + baseX, -0.2 - breathe + baseY + lPunch * 0.09, -0.45 - lPunch * 0.3);
-      this.armL.rotation.set(0.38 - lPunch * 0.25, -0.32 + lPunch * 0.25, 0.12);
+      this.armR.position.set(0.22 - rPunch * 0.14 + baseX, -0.185 + breathe + baseY + rPunch * 0.09 + uk * 0.05, -0.42 - rPunch * 0.3 - uk * 0.18);
+      this.armR.rotation.set(0.95 - rPunch * 0.75, 0.3 - rPunch * 0.25, 0);
+      this.armL.position.set(-0.22 + lPunch * 0.14 + baseX, -0.185 - breathe + baseY + lPunch * 0.09, -0.42 - lPunch * 0.3);
+      this.armL.rotation.set(0.95 - lPunch * 0.75, -0.3 + lPunch * 0.25, 0);
       this.armL.scale.x = -1;
       this.armL.visible = true;
       this.itemAnchor.position.set(0, -10, 0);
