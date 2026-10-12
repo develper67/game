@@ -9,14 +9,16 @@ const VM_SCALE = 0.62; // first-person weapon scale
 // Where the hands go on each gun (gun-local units, before VM_SCALE):
 // r = trigger hand on the grip, l = support hand, rot = arm rotations, sight = ADS sight height
 const HOLD = {
-  pistol: { r: [0, -0.04, 0.035], l: [-0.018, -0.07, 0.045], rr: [0.65, 0.32, 0], lr: [0.45, -0.35, 0.3], sight: 0.105 },
-  revolver: { r: [0, -0.035, 0.065], l: [-0.018, -0.065, 0.075], rr: [0.65, 0.32, 0], lr: [0.45, -0.35, 0.3], sight: 0.104 },
-  smg: { r: [0, -0.04, 0.025], l: [0, -0.05, -0.25], rr: [0.6, 0.3, 0], lr: [0.62, -0.4, 0.25], sight: 0.124 },
-  shotgun: { r: [0, -0.03, 0.08], l: [0, 0.03, -0.36], rr: [0.55, 0.3, 0], lr: [0.6, -0.42, 0.3], sight: 0.115 },
-  rifle: { r: [0, -0.04, 0.05], l: [0, 0.045, -0.34], rr: [0.6, 0.3, 0], lr: [0.6, -0.42, 0.3], sight: 0.16 },
-  sniper: { r: [0, -0.03, 0.06], l: [0, 0.02, -0.4], rr: [0.55, 0.3, 0], lr: [0.58, -0.45, 0.3], sight: 0.165 },
-  blaster: { r: [0, -0.04, 0.05], l: [0, 0.0, -0.22], rr: [0.6, 0.3, 0], lr: [0.62, -0.42, 0.25], sight: 0.14 },
+  pistol: { r: [0, -0.135, 0.05], l: null, rr: [1.3, 0.25, 0], sight: 0.105 },
+  revolver: { r: [0, -0.12, 0.09], l: null, rr: [1.3, 0.25, 0], sight: 0.104 },
+  smg: { r: [0, -0.11, 0.035], l: [0, -0.06, -0.25], rr: [1.25, 0.25, 0], lr: [1.25, -0.2, 0], sight: 0.124 },
+  shotgun: { r: [0, -0.08, 0.1], l: [0, 0.025, -0.36], rr: [1.2, 0.25, 0], lr: [1.25, -0.2, 0], sight: 0.115 },
+  rifle: { r: [0, -0.1, 0.065], l: [0, 0.04, -0.33], rr: [1.25, 0.25, 0], lr: [1.25, -0.2, 0], sight: 0.16 },
+  sniper: { r: [0, -0.09, 0.075], l: [0, 0.01, -0.4], rr: [1.25, 0.25, 0], lr: [1.25, -0.2, 0], sight: 0.165 },
+  blaster: { r: [0, -0.1, 0.065], l: [0, 0.01, -0.22], rr: [1.25, 0.25, 0], lr: [1.25, -0.2, 0], sight: 0.14 },
 };
+// arms are slimmer while holding a gun so they never cover it
+const GUN_ARM = 0.5;
 
 let _armGeo = null;
 
@@ -171,13 +173,19 @@ export class ViewModel {
         (run * 0.55 + (1 - k) * 0.035) * (1 - k),
         rl * 0.55 + run * 0.35);
       const S = VM_SCALE;
+      // hands come up from below and grab the gun from underneath, so the gun stays in full view
+      this.armR.scale.set(GUN_ARM, GUN_ARM, 1);
       this.armR.position.set(hold.r[0] * S, hold.r[1] * S, hold.r[2] * S);
       this.armR.rotation.set(hold.rr[0], hold.rr[1], hold.rr[2]);
-      // support hand slides down to the magazine while reloading
-      this.armL.position.set(hold.l[0] * S - rl * 0.03, hold.l[1] * S - rl * 0.07, hold.l[2] * S + rl * 0.12);
-      this.armL.rotation.set(hold.lr[0] + rl * 0.4, hold.lr[1], hold.lr[2]);
-      this.armL.visible = true;
+      this.armL.visible = !!hold.l;
+      if (hold.l) {
+        // support hand drops to the magazine while reloading
+        this.armL.scale.set(-GUN_ARM, GUN_ARM, 1);
+        this.armL.position.set(hold.l[0] * S - rl * 0.02, hold.l[1] * S - rl * 0.05, hold.l[2] * S + rl * 0.12);
+        this.armL.rotation.set(hold.lr[0] + rl * 0.2, hold.lr[1], hold.lr[2]);
+      }
     } else if (this.state === 'potato' || this.state === 'chicken') {
+      this.armR.scale.set(1, 1, 1); this.armL.scale.set(-1, 1, 1);
       const wob = this.state === 'potato' ? Math.sin(this.t * 18) * 0.01 : 0;
       const pass = this.useT > 0 ? Math.sin((this.useT / 0.25) * Math.PI) * 0.25 : 0;
       const ix = this.state === 'chicken' ? 0.16 : 0.12;
@@ -198,7 +206,7 @@ export class ViewModel {
       this.armR.rotation.set(0.95 - rPunch * 0.75, 0.3 - rPunch * 0.25, 0);
       this.armL.position.set(-0.22 + lPunch * 0.14 + baseX, -0.185 - breathe + baseY + lPunch * 0.09, -0.42 - lPunch * 0.3);
       this.armL.rotation.set(0.95 - lPunch * 0.75, -0.3 + lPunch * 0.25, 0);
-      this.armL.scale.x = -1;
+      this.armR.scale.set(1, 1, 1); this.armL.scale.set(-1, 1, 1);
       this.armL.visible = true;
       this.itemAnchor.position.set(0, -10, 0);
     }
