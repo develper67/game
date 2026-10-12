@@ -32,7 +32,7 @@ export const MODES = {
     color: '#ff4d6d',
     icon: '🏃',
     desc: 'One player is IT. Punch someone to pass it on. Whoever is IT when time runs out loses.',
-    minPlayers: 3,
+    minPlayers: 2,
     maxPlayers: 8,
     duration: 150,
   },
@@ -43,7 +43,7 @@ export const MODES = {
     color: '#ff9f1c',
     icon: '🔥',
     desc: 'Pass the ridiculous Boob-tato with E before it pops. Lose all your lives and you are out. Last one standing wins.',
-    minPlayers: 3,
+    minPlayers: 2,
     maxPlayers: 8,
     duration: 600,
   },
@@ -90,7 +90,7 @@ export const MATCH = {
   COUNTDOWN_SECONDS: 4,
   RESULTS_SECONDS: 12,
   MAX_PLAYERS: 8,
-  MIN_PARTICIPANTS: 4, // bots fill up to this many
+  MIN_PARTICIPANTS: 4, // practice / lone-player matches: bots fill up to this many
   QUEUE_SOLO_WAIT_SECONDS: 25, // a lone player in queue gets bots after this
   REJOIN_GRACE_MS: 45000,
 };

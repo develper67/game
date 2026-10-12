@@ -114,7 +114,7 @@ Every match starts with a **map vote** (previews, names, live vote counts, timer
 
 ### Practice and bots
 
-**Practice vs bots** starts a match immediately, with bots filling it up to 4 players. Online matchmaking groups players (and whole parties) per mode. If you're alone in the queue, you can start right away with bots, or bots fill in after 25 s. Bots chase and flee in Tag, pass the Boob-tato, steal and deliver the chicken, loot and fight in Hidden Guns, and gather, craft and fight in Scavenge & Craft. Practice matches pay 50% coins.
+**Practice vs bots** starts a match immediately, with bots filling it up to 4 players. **Find match** is for real players: it groups players (and whole parties) per mode, and a match with 2, 3, 4 or more real players has **no bots**. Whoever queued first is the lobby host (for a party, its leader) and can press **Start now (N players)** as soon as a second player is there; otherwise the match starts on its own 12 s after the second player joins, or immediately at 8. If you're alone in the queue, you can start right away with bots, or bots fill in after 25 s. Every mode works with as few as 2 players. Bots chase and flee in Tag, pass the Boob-tato, steal and deliver the chicken, loot and fight in Hidden Guns, and gather, craft and fight in Scavenge & Craft. Practice matches pay 50% coins.
 
 ### Friends, parties and chat
 

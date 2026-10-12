@@ -97,9 +97,11 @@ export class Matchmaking {
       lobby.countdownEndsAt = 0;
       if (!lobby.soloEndsAt) lobby.soloEndsAt = now + MATCH.QUEUE_SOLO_WAIT_SECONDS * 1000;
     }
+    const host = this.hostOf(lobby);
     const payload = {
       lobby: lobby.id, mode: lobby.mode,
       players: lobby.clients.map((c) => ({ username: c.username, partyId: c.partyId })),
+      host: host ? { userId: host.userId, username: host.username } : null,
       countdownEndsAt: lobby.countdownEndsAt, soloEndsAt: lobby.soloEndsAt, max: MATCH.MAX_PLAYERS,
       serverTime: now,
     };
@@ -124,13 +126,22 @@ export class Matchmaking {
     return { ok: true };
   }
 
+  // The lobby host is whoever queued first (or the leader of their party).
+  hostOf(lobby) {
+    const first = lobby.clients[0];
+    if (!first) return null;
+    const party = first.partyId ? this.services.party.get(first.partyId) : null;
+    if (party) return lobby.clients.find((c) => c.userId === party.leader) || first;
+    return first;
+  }
+
+  // The host can start right away: with 2+ real players the match has no
+  // bots at all; someone queued alone gets bots instead.
   startNow(client) {
     const lobby = client.queue ? this.lobbies.get(client.queue) : null;
     if (!lobby) return { error: 'You are not in a queue.' };
-    // allowed when everyone in the lobby is from the requester's group
-    const sameGroup = lobby.clients.every((c) => c === client || (client.partyId && c.partyId === client.partyId));
-    if (!sameGroup) return { error: 'Other players are queued — the match starts automatically.' };
-    if (client.partyId && this.services.party.get(client.partyId)?.leader !== client.userId) return { error: 'Only the party leader can do that.' };
+    const host = this.hostOf(lobby);
+    if (host !== client) return { error: `Only ${host ? host.username : 'the host'} can start this match early — it also starts automatically.` };
     this.launchLobby(lobby);
     return { ok: true };
   }
@@ -150,12 +161,13 @@ export class Matchmaking {
     this.lobbies.delete(lobby.id);
     const clients = lobby.clients.filter((c) => this.hub.get(c.userId) === c);
     for (const c of clients) c.queue = null;
-    if (clients.length) this.createMatch(lobby.mode, false, clients);
+    // real-player matches: 2, 3, 4… humans play on their own; only a lone player gets bots
+    if (clients.length) this.createMatch(lobby.mode, false, clients, { fillBots: clients.length < 2 });
   }
 
-  createMatch(mode, practice, clients) {
+  createMatch(mode, practice, clients, { fillBots = true } = {}) {
     const m = new Match({
-      mode, practice,
+      mode, practice, fillBots,
       humans: clients.map((c) => this.humanInfo(c)),
       services: this.services, hub: this.hub, io: this.io,
       onFinished: (match) => this.matches.delete(match.id),

@@ -163,10 +163,13 @@ export class PlayTab {
     }
     if (!this.q) this.buildQueue();
     const now = this.app.net.serverNow();
-    const isAlone = q.players.length === 1 || q.players.every((p) => p.partyId && p.partyId === (this.app.social.party && this.app.social.party.id));
+    const n = q.players.length;
+    const isHost = !!(q.host && q.host.userId === this.app.user.id);
     let status;
-    if (q.countdownEndsAt) status = `Match starts in ${Math.max(0, Math.ceil((q.countdownEndsAt - now) / 1000))}s`;
-    else if (q.soloEndsAt) status = `Waiting for players… bots will fill in ${fmtTime((q.soloEndsAt - now) / 1000)}`;
+    if (q.countdownEndsAt) {
+      const left = Math.max(0, Math.ceil((q.countdownEndsAt - now) / 1000));
+      status = isHost ? `${n} real players — start now or wait ${left}s for more` : `Starting in ${left}s with ${n} players (or when ${q.host ? q.host.username : 'the host'} starts it)`;
+    } else if (q.soloEndsAt) status = `Waiting for players… bots will fill in ${fmtTime((q.soloEndsAt - now) / 1000)}`;
     else status = 'Waiting for players…';
     // update text in place so clicks on Cancel / Start now are never lost
     const r = this.q;
@@ -182,7 +185,10 @@ export class PlayTab {
       r.names = names;
       mount(r.pills, q.players.map((p) => h('span', { class: 'pill', text: p.username })));
     }
-    r.startNow.classList.toggle('hidden', !isAlone);
+    // the host can start at once: 2+ players play without bots, a lone player gets bots
+    const label = n >= 2 ? `▶ Start now (${n} players)` : '▶ Start now with bots';
+    if (r.startNow.textContent !== label) r.startNow.textContent = label;
+    r.startNow.classList.toggle('hidden', !isHost);
   }
 
   buildQueue() {
